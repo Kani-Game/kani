@@ -1,0 +1,8 @@
+{
+  "name": "Remix KaniGame",
+  "description": "Browse and request 150+ Steam Offline and Free external games with Telegram integration, and manage catalog via secure Admin Dashboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

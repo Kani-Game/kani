@@ -1,0 +1,73 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global helper primitives
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Validation for Game entity
+    function isValidGame(data) {
+      return data.name is string && data.name.size() > 0 && data.name.size() <= 300
+        && data.tag is string && data.tag.size() > 0 && data.tag.size() <= 100
+        && data.genre is string && data.genre.size() > 0 && data.genre.size() <= 100
+        && data.img is string && data.img.size() > 0 && data.img.size() <= 500000;
+    }
+
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Games catalog - public read for all visitors across Chrome, Firefox, mobile, Netlify
+    match /games/{gameId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(gameId) && isValidGame(incoming());
+      allow delete: if isValidId(gameId);
+    }
+
+    // POS sales receipts
+    match /sales/{saleId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(saleId);
+      allow delete: if isValidId(saleId);
+    }
+
+    // Daily financial ledger rows
+    match /reportRows/{rowId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(rowId);
+      allow delete: if isValidId(rowId);
+    }
+
+    // Operating expenses
+    match /expenses/{expenseId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(expenseId);
+      allow delete: if isValidId(expenseId);
+    }
+
+    // Site and POS settings
+    match /settings/{settingId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(settingId);
+      allow delete: if isValidId(settingId);
+    }
+
+    // Report snapshots & version history
+    match /versionHistory/{versionId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(versionId);
+      allow delete: if isValidId(versionId);
+    }
+  }
+}

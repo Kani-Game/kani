@@ -1,0 +1,102 @@
+{
+  "entities": {
+    "Game": {
+      "title": "Game",
+      "description": "Game or merchandise product in catalog",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier" },
+        "name": { "type": "string", "description": "Title of the game or product", "maxLength": 300 },
+        "tag": { "type": "string", "description": "Category tag e.g. Steam Offline, Product, Free", "maxLength": 100 },
+        "genre": { "type": "string", "description": "Game genre or product category", "maxLength": 100 },
+        "img": { "type": "string", "description": "Cover artwork image URL or data URL" },
+        "link": { "type": "string", "description": "Optional download or official store URL" },
+        "description": { "type": "string", "description": "Optional short description or receipt details" },
+        "price": { "type": "number", "description": "Selling price in USD" },
+        "costPrice": { "type": "number", "description": "Buy-in cost price in USD" },
+        "barcode": { "type": "string", "description": "Optional SKU or barcode" },
+        "stock": { "type": "number", "description": "Optional inventory count" },
+        "createdAt": { "type": "string", "description": "ISO timestamp" }
+      },
+      "required": ["name", "tag", "genre", "img"]
+    },
+    "POSSale": {
+      "title": "POSSale",
+      "description": "Completed point-of-sale cashier transaction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "receiptNo": { "type": "string" },
+        "date": { "type": "string" },
+        "totalUsd": { "type": "number" },
+        "totalKhr": { "type": "number" },
+        "paymentMethod": { "type": "string" },
+        "cashierName": { "type": "string" }
+      },
+      "required": ["id", "receiptNo", "totalUsd", "date"]
+    },
+    "DailyReportRow": {
+      "title": "DailyReportRow",
+      "description": "Ledger financial row for daily profit calculation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "gameName": { "type": "string" },
+        "category": { "type": "string" },
+        "buyIn": { "type": "number" },
+        "sellOut": { "type": "number" },
+        "profit": { "type": "number" },
+        "date": { "type": "string" }
+      },
+      "required": ["id", "gameName", "category", "buyIn", "sellOut", "profit", "date"]
+    },
+    "ExpenseItem": {
+      "title": "ExpenseItem",
+      "description": "Shop operating expenses item",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "price": { "type": "number" }
+      },
+      "required": ["id", "name", "price"]
+    },
+    "SiteSettings": {
+      "title": "SiteSettings",
+      "description": "Global storefront and POS settings",
+      "type": "object",
+      "properties": {
+        "portalTitle": { "type": "string" },
+        "portalSubtitle": { "type": "string" },
+        "khrExchangeRate": { "type": "number" },
+        "posCashierName": { "type": "string" }
+      }
+    }
+  },
+  "firestore": {
+    "/games/{gameId}": {
+      "schema": { "$ref": "#/entities/Game" },
+      "description": "Collection of games and products synced across all browsers and devices"
+    },
+    "/sales/{saleId}": {
+      "schema": { "$ref": "#/entities/POSSale" },
+      "description": "Point of sale completed receipts"
+    },
+    "/reportRows/{rowId}": {
+      "schema": { "$ref": "#/entities/DailyReportRow" },
+      "description": "Daily ledger rows"
+    },
+    "/expenses/{expenseId}": {
+      "schema": { "$ref": "#/entities/ExpenseItem" },
+      "description": "Operating expenses"
+    },
+    "/settings/{settingId}": {
+      "schema": { "$ref": "#/entities/SiteSettings" },
+      "description": "Portal and POS configuration settings"
+    },
+    "/versionHistory/{versionId}": {
+      "schema": { "type": "object" },
+      "description": "Daily report versions and ledger snapshots"
+    }
+  }
+}

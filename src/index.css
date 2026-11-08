@@ -1,0 +1,151 @@
+@import "tailwindcss";
+
+@theme {
+  --font-orbitron: "Orbitron", sans-serif;
+  --font-rajdhani: "Rajdhani", "Kantumruy Pro", sans-serif;
+  --font-sans: "Inter", "Kantumruy Pro", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --color-brand-purple: #8b5cf6;
+  --color-brand-neon: #a855f7;
+  --color-brand-cyan: #06b6d4;
+  --color-brand-pink: #ec4899;
+  --color-brand-dark: #0b0f19;
+  --color-brand-card: #131b2e;
+  --color-brand-border: #1f293d;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #0b0f19;
+}
+::-webkit-scrollbar-thumb {
+  background: #1f293d;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #a855f7;
+}
+
+.glow-title {
+  text-shadow: 0 0 12px rgba(168, 85, 247, 0.6), 0 0 24px rgba(6, 182, 212, 0.4);
+}
+
+.glow-box {
+  box-shadow: 0 0 15px rgba(139, 92, 246, 0.15);
+}
+.glow-box:hover {
+  box-shadow: 0 0 25px rgba(168, 85, 247, 0.45);
+}
+
+.card-selected {
+  border-color: #a855f7 !important;
+  box-shadow: 0 0 25px rgba(168, 85, 247, 0.6) !important;
+}
+
+.shadow-neon-purple {
+  box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
+}
+
+.shadow-neon-cyan {
+  box-shadow: 0 0 20px rgba(6, 182, 212, 0.4);
+}
+
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #pos-printable-receipt,
+  #pos-printable-receipt * {
+    visibility: visible;
+  }
+  #pos-printable-receipt {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    max-width: 80mm;
+    margin: 0 auto;
+    padding: 10px;
+    box-shadow: none !important;
+    border: none !important;
+    background: white !important;
+    color: black !important;
+  }
+}
+
+/* Financial Report 4 Dynamic Text Sizes with Crystal-Clear Rendering */
+.financial-size-sm,
+.financial-size-md,
+.financial-size-lg,
+.financial-size-xl {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.financial-size-sm {
+  --fin-cell-padding-y: 0.35rem;
+  --fin-cell-padding-x: 0.5rem;
+}
+.financial-size-sm table,
+.financial-size-sm .fin-table-text {
+  font-size: 11px;
+  line-height: 1.4;
+  font-weight: 400;
+}
+.financial-size-sm .fin-header-text {
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  font-weight: 500;
+}
+
+.financial-size-md {
+  --fin-cell-padding-y: 0.5rem;
+  --fin-cell-padding-x: 0.65rem;
+}
+.financial-size-md table,
+.financial-size-md .fin-table-text {
+  font-size: 13px;
+  line-height: 1.45;
+  font-weight: 400;
+}
+.financial-size-md .fin-header-text {
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  font-weight: 500;
+}
+
+.financial-size-lg {
+  --fin-cell-padding-y: 0.6rem;
+  --fin-cell-padding-x: 0.8rem;
+}
+.financial-size-lg table,
+.financial-size-lg .fin-table-text {
+  font-size: 15px;
+  line-height: 1.5;
+  font-weight: 400;
+}
+.financial-size-lg .fin-header-text {
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+
+.financial-size-xl {
+  --fin-cell-padding-y: 0.75rem;
+  --fin-cell-padding-x: 0.95rem;
+}
+.financial-size-xl table,
+.financial-size-xl .fin-table-text {
+  font-size: 17px;
+  line-height: 1.5;
+  font-weight: 400;
+}
+.financial-size-xl .fin-header-text {
+  font-size: 13.5px;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+
