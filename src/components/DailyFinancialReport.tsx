@@ -482,17 +482,12 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Refresh data from storage on mount, auto-sync new POS transactions, and subscribe to real-time Cloud updates
+  // Refresh data from storage on mount and subscribe to real-time Cloud updates
   useEffect(() => {
-    // Initial auto-merge of any pending POS sales
-    const syncRes = StorageService.syncReportWithPosSales('merge');
     setRows(StorageService.getReportRows());
     setExpenses(StorageService.getExpenses());
     setPosSales(StorageService.getSales());
     setVersionHistory(StorageService.getVersionHistory());
-    if (syncRes.addedCount > 0) {
-      onShowToast?.(`⚡ ធ្វើសមកាលកម្ម ${syncRes.addedCount} ទំនិញពី POS Transactions!`, 'info');
-    }
 
     // Real-time Cloud listeners across Chrome, Firefox, Netlify, and Mobile
     const unsubRows = StorageService.subscribeToReportRows((cloudRows) => {
@@ -680,22 +675,22 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
     onShowToast?.('បានកែប្រែទិន្នន័យជោគជ័យ!', 'success');
   };
 
-  const handleDeleteRow = (id: string) => {
+  const handleDeleteRow = async (id: string) => {
     const target = rows.find((r) => r.id === id);
     pushUndoSnapshot(rows);
-    StorageService.deleteReportRow(id);
+    await StorageService.deleteReportRow(id);
     StorageService.createVersionSnapshot(`Deleted row: ${target?.gameName || id}`, 'ledger_edit', 'Admin');
     setRows(StorageService.getReportRows());
     setVersionHistory(StorageService.getVersionHistory());
     onShowToast?.('បានលុបទិន្នន័យរួចរាល់', 'info');
   };
 
-  const handleClearManualRows = () => {
+  const handleClearManualRows = async () => {
     if (!window.confirm(`តើអ្នកពិតជាចង់លុបទិន្នន័យ Manual ទាំង ${manualRowCount} មែនទេ? (វានឹងមិនលេចឡើងមកវិញទេ)`)) {
       return;
     }
     pushUndoSnapshot(rows);
-    StorageService.clearManualReportRows();
+    await StorageService.clearManualReportRows();
     StorageService.createVersionSnapshot(`Cleared all manual rows (${manualRowCount} items)`, 'ledger_edit', 'Admin');
     const posOnly = StorageService.getReportRows();
     setRows(posOnly);
@@ -703,12 +698,12 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
     onShowToast?.(`បានលុបទិន្នន័យ Manual ទាំង ${manualRowCount} រួចរាល់! វានឹងមិនលេចឡើងមកវិញទេ`, 'success');
   };
 
-  const handleClearAllRows = () => {
+  const handleClearAllRows = async () => {
     if (!window.confirm('តើអ្នកពិតជាចង់លុបទិន្នន័យទាំងអស់ក្នុង Report នេះមែនទេ? (វានឹងមិនលេចឡើងមកវិញទេ)')) {
       return;
     }
     pushUndoSnapshot(rows);
-    StorageService.clearAllReportRows();
+    await StorageService.clearAllReportRows();
     StorageService.createVersionSnapshot('Cleared all report rows', 'ledger_edit', 'Admin');
     setRows([]);
     setVersionHistory(StorageService.getVersionHistory());

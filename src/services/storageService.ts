@@ -15,14 +15,19 @@ function cleanFirestoreDoc<T extends Record<string, any>>(obj: T): Record<string
 }
 
 const STORAGE_KEY_GAMES = 'kanigame_catalog_v1';
+const STORAGE_KEY_DELETED_GAMES = 'kanigame_deleted_games_v2';
 const STORAGE_KEY_SETTINGS = 'kanigame_settings_v1';
 const STORAGE_KEY_AUTH = 'kanigame_admin_auth_v1';
 const STORAGE_KEY_CREDENTIALS = 'kanigame_admin_credentials_v1';
 const STORAGE_KEY_POS_SALES = 'kanigame_pos_sales_v1';
 const STORAGE_KEY_REPORT_ROWS = 'kanigame_report_rows_v2';
+const STORAGE_KEY_DELETED_REPORT_ROWS = 'kanigame_deleted_report_rows_v2';
 const STORAGE_KEY_REPORT_INITIALIZED = 'kanigame_report_initialized_v2';
 const STORAGE_KEY_EXPENSES = 'kanigame_expenses_v2';
 const STORAGE_KEY_VERSION_HISTORY = 'kanigame_version_history_v1';
+
+let cachedDeletedGameIds: Set<string> | null = null;
+let cachedDeletedReportRowIds: Set<string> | null = null;
 
 export const DEFAULT_SETTINGS: SiteSettings = {
   portalTitle: 'KANI GAME',
@@ -139,14 +144,65 @@ async function idbSet(key: string, value: any): Promise<void> {
 let cachedGames: Game[] | null = null;
 
 export const StorageService = {
-  // Automatically merges latest games added to code (Google AI Studio / GitHub) with locally uploaded items on Netlify
+  getDeletedGameIds(): Set<string> {
+    if (cachedDeletedGameIds) {
+      return cachedDeletedGameIds;
+    }
+    try {
+      const data = localStorage.getItem(STORAGE_KEY_DELETED_GAMES);
+      if (data) {
+        const parsed = JSON.parse(data);
+        if (Array.isArray(parsed)) {
+          cachedDeletedGameIds = new Set(parsed);
+          return cachedDeletedGameIds;
+        }
+      }
+    } catch {}
+    cachedDeletedGameIds = new Set<string>();
+    return cachedDeletedGameIds;
+  },
+
+  recordDeletedGameIds(ids: string[]): void {
+    const current = this.getDeletedGameIds();
+    ids.forEach((id) => {
+      if (id) {
+        current.add(id);
+        current.add(id.toLowerCase());
+      }
+    });
+    cachedDeletedGameIds = current;
+    try {
+      const arr = Array.from(current);
+      localStorage.setItem(STORAGE_KEY_DELETED_GAMES, JSON.stringify(arr));
+      idbSet(STORAGE_KEY_DELETED_GAMES, arr).catch(() => {});
+      setDoc(doc(db, 'settings', 'deletedGameMeta'), { ids: arr }, { merge: true }).catch(() => {});
+    } catch {}
+  },
+
+  clearDeletedGameIds(): void {
+    cachedDeletedGameIds = new Set<string>();
+    try {
+      localStorage.removeItem(STORAGE_KEY_DELETED_GAMES);
+      idbSet(STORAGE_KEY_DELETED_GAMES, []).catch(() => {});
+      setDoc(doc(db, 'settings', 'deletedGameMeta'), { ids: [] }, { merge: true }).catch(() => {});
+    } catch {}
+  },
+
+  // Automatically merges latest games added to code (Google AI Studio / GitHub) with locally uploaded items on Netlify,
+  // while strictly respecting items the user intentionally deleted
   mergeWithLatestCodebase(existingGames: Game[]): Game[] {
+    const deletedIds = this.getDeletedGameIds();
     const existingIds = new Set(existingGames.map((g) => g.id));
     const existingNames = new Set(existingGames.map((g) => g.name.trim().toLowerCase()));
 
     const missingFromCodebase: Game[] = [];
     for (const codeGame of ALL_INITIAL_GAMES) {
-      if (!existingIds.has(codeGame.id) && !existingNames.has(codeGame.name.trim().toLowerCase())) {
+      const lowerName = codeGame.name.trim().toLowerCase();
+      // If user intentionally deleted this item by ID or name, NEVER resurrect it!
+      if (deletedIds.has(codeGame.id) || deletedIds.has(lowerName)) {
+        continue;
+      }
+      if (!existingIds.has(codeGame.id) && !existingNames.has(lowerName)) {
         missingFromCodebase.push(codeGame);
       }
     }
@@ -336,7 +392,15 @@ export const StorageService = {
 
   deleteGame(id: string): void {
     const games = this.getGames();
-    const filtered = games.filter(g => g.id !== id);
+    const target = games.find((g) => g.id === id);
+    const toRecord = [id];
+    if (target?.name) {
+      toRecord.push(target.name.trim().toLowerCase());
+    }
+    this.recordDeletedGameIds(toRecord);
+
+    const filtered = games.filter((g) => g.id !== id);
+    cachedGames = filtered;
     this.saveGames(filtered);
 
     try {
@@ -347,9 +411,19 @@ export const StorageService = {
   },
 
   deleteMultipleGames(ids: string[]): void {
-    const idSet = new Set(ids);
     const games = this.getGames();
-    const filtered = games.filter(g => !idSet.has(g.id));
+    const toRecord = [...ids];
+    ids.forEach((id) => {
+      const target = games.find((g) => g.id === id);
+      if (target?.name) {
+        toRecord.push(target.name.trim().toLowerCase());
+      }
+    });
+    this.recordDeletedGameIds(toRecord);
+
+    const idSet = new Set(ids);
+    const filtered = games.filter((g) => !idSet.has(g.id));
+    cachedGames = filtered;
     this.saveGames(filtered);
 
     try {
@@ -362,6 +436,8 @@ export const StorageService = {
   },
 
   resetToDefault(): Game[] {
+    this.clearDeletedGameIds();
+    cachedGames = ALL_INITIAL_GAMES;
     this.saveGames(ALL_INITIAL_GAMES);
     try {
       ALL_INITIAL_GAMES.forEach((g) => {
@@ -658,6 +734,49 @@ export const StorageService = {
     }
   },
 
+  getDeletedReportRowIds(): Set<string> {
+    if (cachedDeletedReportRowIds) {
+      return cachedDeletedReportRowIds;
+    }
+    try {
+      const data = localStorage.getItem(STORAGE_KEY_DELETED_REPORT_ROWS);
+      if (data) {
+        const parsed = JSON.parse(data);
+        if (Array.isArray(parsed)) {
+          cachedDeletedReportRowIds = new Set(parsed);
+          return cachedDeletedReportRowIds;
+        }
+      }
+    } catch {}
+    cachedDeletedReportRowIds = new Set<string>();
+    return cachedDeletedReportRowIds;
+  },
+
+  recordDeletedReportRowIds(ids: string[]): void {
+    const current = this.getDeletedReportRowIds();
+    ids.forEach((id) => {
+      if (id) {
+        current.add(id);
+      }
+    });
+    cachedDeletedReportRowIds = current;
+    try {
+      const arr = Array.from(current);
+      localStorage.setItem(STORAGE_KEY_DELETED_REPORT_ROWS, JSON.stringify(arr));
+      idbSet(STORAGE_KEY_DELETED_REPORT_ROWS, arr).catch(() => {});
+      setDoc(doc(db, 'settings', 'deletedReportMeta'), { ids: arr }, { merge: true }).catch(() => {});
+    } catch {}
+  },
+
+  clearDeletedReportRowIds(): void {
+    cachedDeletedReportRowIds = new Set<string>();
+    try {
+      localStorage.removeItem(STORAGE_KEY_DELETED_REPORT_ROWS);
+      idbSet(STORAGE_KEY_DELETED_REPORT_ROWS, []).catch(() => {});
+      setDoc(doc(db, 'settings', 'deletedReportMeta'), { ids: [] }, { merge: true }).catch(() => {});
+    } catch {}
+  },
+
   // Synchronize Daily Report directly with all POS Transactions
   syncReportWithPosSales(mode: 'merge' | 'rebuild_all' = 'merge'): {
     addedCount: number;
@@ -665,14 +784,23 @@ export const StorageService = {
   } {
     const sales = this.getSales();
     const currentRows = this.getReportRows();
+    const deletedRowIds = this.getDeletedReportRowIds();
 
     if (mode === 'rebuild_all') {
       const manualRows = currentRows.filter((r) => r.source !== 'pos');
       const posRows: DailyReportRow[] = [];
 
       sales.forEach((sale) => {
+        // If user deleted this entire POS sale from the report, do not re-add it
+        if (deletedRowIds.has(sale.id) || (sale.receiptNo && deletedRowIds.has(sale.receiptNo))) {
+          return;
+        }
         const saleDate = formatReportDate(new Date(sale.date));
         sale.items.forEach((item, idx) => {
+          const rowId = `pos_row_${sale.id}_${item.id}_${idx}`;
+          if (deletedRowIds.has(rowId)) {
+            return;
+          }
           const tagLower = (item.tag || '').toLowerCase();
           let cat: ReportCategory = 'Product';
           if (tagLower.includes('steam')) {
@@ -688,7 +816,7 @@ export const StorageService = {
           const profit = sellOut - buyIn;
 
           posRows.push({
-            id: `pos_row_${sale.id}_${item.id}_${idx}`,
+            id: rowId,
             gameName: item.name,
             category: cat,
             buyIn,
@@ -723,9 +851,17 @@ export const StorageService = {
 
     const newRowsToAppend: DailyReportRow[] = [];
     sales.forEach((sale) => {
+      // Respect user deletion
+      if (deletedRowIds.has(sale.id) || (sale.receiptNo && deletedRowIds.has(sale.receiptNo))) {
+        return;
+      }
       if (!existingSaleIds.has(sale.id) && !existingReceiptNos.has(sale.receiptNo)) {
         const saleDate = formatReportDate(new Date(sale.date));
         sale.items.forEach((item, idx) => {
+          const rowId = `pos_row_${sale.id}_${item.id}_${idx}`;
+          if (deletedRowIds.has(rowId)) {
+            return;
+          }
           const tagLower = (item.tag || '').toLowerCase();
           let cat: ReportCategory = 'Product';
           if (tagLower.includes('steam')) {
@@ -741,7 +877,7 @@ export const StorageService = {
           const profit = sellOut - buyIn;
 
           newRowsToAppend.push({
-            id: `pos_row_${sale.id}_${item.id}_${idx}`,
+            id: rowId,
             gameName: item.name,
             category: cat,
             buyIn,
@@ -787,6 +923,7 @@ export const StorageService = {
   },
 
   // Daily Financial Report Rows Management
+  // Pure reader: NEVER writes or re-seeds sample data on read!
   getReportRows(): DailyReportRow[] {
     try {
       const data = localStorage.getItem(STORAGE_KEY_REPORT_ROWS);
@@ -799,14 +936,7 @@ export const StorageService = {
     } catch (e) {
       console.error('Failed to load report rows', e);
     }
-    // If the report was ever initialized, a missing/null value means the user emptied it: return []
-    if (this.isReportInitialized()) {
-      return [];
-    }
-    // Only pre-populate if key never existed in localStorage and never initialized
-    this.markReportInitialized();
-    this.saveReportRows(INITIAL_REPORT_ROWS);
-    return INITIAL_REPORT_ROWS;
+    return [];
   },
 
   // Real-time Cloud Listener for Daily Financial Report Rows
@@ -816,9 +946,13 @@ export const StorageService = {
       collRef,
       (snapshot) => {
         if (!snapshot.empty) {
+          const deletedRowIds = this.getDeletedReportRowIds();
           const cloudRows: DailyReportRow[] = [];
           snapshot.forEach((docSnap) => {
-            cloudRows.push(docSnap.data() as DailyReportRow);
+            // Exclude anything previously deleted by the user
+            if (!deletedRowIds.has(docSnap.id)) {
+              cloudRows.push(docSnap.data() as DailyReportRow);
+            }
           });
           cloudRows.sort((a: any, b: any) => {
             if (typeof a.sortIndex === 'number' && typeof b.sortIndex === 'number') {
@@ -833,39 +967,14 @@ export const StorageService = {
           } catch {}
           callback(cloudRows);
         } else {
-          // If Firestore collection is empty, check if it was already initialized
-          if (this.isReportInitialized()) {
-            // User intentionally deleted or cleared all rows: do NOT rollback or re-seed!
-            try {
-              localStorage.setItem(STORAGE_KEY_REPORT_ROWS, JSON.stringify([]));
-              idbSet(STORAGE_KEY_REPORT_ROWS, []).catch(() => {});
-            } catch {}
-            callback([]);
-            return;
-          }
-
-          // Check cloud reportMeta doc before deciding whether to seed
-          getDoc(doc(db, 'settings', 'reportMeta'))
-            .then((metaSnap) => {
-              if (metaSnap.exists() && metaSnap.data()?.initialized) {
-                // Cloud already initialized: user has an empty report. Deliver []!
-                this.markReportInitialized();
-                try {
-                  localStorage.setItem(STORAGE_KEY_REPORT_ROWS, JSON.stringify([]));
-                  idbSet(STORAGE_KEY_REPORT_ROWS, []).catch(() => {});
-                } catch {}
-                callback([]);
-              } else {
-                // First boot only on clean project: seed once and mark initialized
-                this.markReportInitialized();
-                INITIAL_REPORT_ROWS.forEach((r, idx) => {
-                  setDoc(doc(db, 'reportRows', r.id), cleanFirestoreDoc({ ...r, sortIndex: idx })).catch(() => {});
-                });
-              }
-            })
-            .catch(() => {
-              callback([]);
-            });
+          // If Firestore collection is empty, the report is legitimately empty!
+          // NEVER auto-seed or restore 16 rows when the collection is empty!
+          this.markReportInitialized();
+          try {
+            localStorage.setItem(STORAGE_KEY_REPORT_ROWS, JSON.stringify([]));
+            idbSet(STORAGE_KEY_REPORT_ROWS, []).catch(() => {});
+          } catch {}
+          callback([]);
         }
       },
       (error) => {
@@ -883,11 +992,16 @@ export const StorageService = {
       // Find any removed documents from previous state and delete them from Firestore
       const existing = this.getReportRows();
       const newIds = new Set(rows.map((r) => r.id));
+      const deletedIds: string[] = [];
       existing.forEach((r) => {
         if (!newIds.has(r.id)) {
+          deletedIds.push(r.id);
           deleteDoc(doc(db, 'reportRows', r.id)).catch(() => {});
         }
       });
+      if (deletedIds.length > 0) {
+        this.recordDeletedReportRowIds(deletedIds);
+      }
 
       localStorage.setItem(STORAGE_KEY_REPORT_ROWS, JSON.stringify(rows));
       idbSet(STORAGE_KEY_REPORT_ROWS, rows).catch(() => {});
@@ -901,16 +1015,30 @@ export const StorageService = {
     }
   },
 
-  clearManualReportRows(): void {
+  async clearManualReportRows(): Promise<void> {
     this.markReportInitialized();
     const current = this.getReportRows();
-    const manualRows = current.filter((r) => r.source !== 'pos');
     const posOnly = current.filter((r) => r.source === 'pos');
 
-    // Delete every manual row doc from Firestore
-    manualRows.forEach((r) => {
-      deleteDoc(doc(db, 'reportRows', r.id)).catch(() => {});
-    });
+    // 1. Query all Firestore report documents to ensure every manual document is deleted
+    try {
+      const snap = await getDocs(collection(db, 'reportRows'));
+      const deletedIds: string[] = [];
+      const deletePromises: Promise<any>[] = [];
+      snap.forEach((docSnap) => {
+        const data = docSnap.data();
+        if (data.source !== 'pos' && !docSnap.id.startsWith('pos_row_')) {
+          deletedIds.push(docSnap.id);
+          deletePromises.push(deleteDoc(doc(db, 'reportRows', docSnap.id)).catch(() => {}));
+        }
+      });
+      await Promise.all(deletePromises);
+      if (deletedIds.length > 0) {
+        this.recordDeletedReportRowIds(deletedIds);
+      }
+    } catch (err) {
+      console.warn('Firestore query clearManualReportRows warning:', err);
+    }
 
     try {
       localStorage.setItem(STORAGE_KEY_REPORT_ROWS, JSON.stringify(posOnly));
@@ -923,14 +1051,25 @@ export const StorageService = {
     });
   },
 
-  clearAllReportRows(): void {
+  async clearAllReportRows(): Promise<void> {
     this.markReportInitialized();
-    const current = this.getReportRows();
 
-    // Delete every row doc from Firestore
-    current.forEach((r) => {
-      deleteDoc(doc(db, 'reportRows', r.id)).catch(() => {});
-    });
+    // 1. Query and delete every single document in Firestore reportRows
+    try {
+      const snap = await getDocs(collection(db, 'reportRows'));
+      const deletedIds: string[] = [];
+      const deletePromises: Promise<any>[] = [];
+      snap.forEach((docSnap) => {
+        deletedIds.push(docSnap.id);
+        deletePromises.push(deleteDoc(doc(db, 'reportRows', docSnap.id)).catch(() => {}));
+      });
+      await Promise.all(deletePromises);
+      if (deletedIds.length > 0) {
+        this.recordDeletedReportRowIds(deletedIds);
+      }
+    } catch (err) {
+      console.warn('Firestore query clearAllReportRows warning:', err);
+    }
 
     try {
       localStorage.setItem(STORAGE_KEY_REPORT_ROWS, JSON.stringify([]));
@@ -939,7 +1078,7 @@ export const StorageService = {
   },
 
   resetReportRowsToDefault(): DailyReportRow[] {
-    this.clearAllReportRows();
+    this.clearDeletedReportRowIds();
     INITIAL_REPORT_ROWS.forEach((r, idx) => {
       setDoc(doc(db, 'reportRows', r.id), cleanFirestoreDoc({ ...r, sortIndex: idx })).catch(() => {});
     });
@@ -1042,15 +1181,25 @@ export const StorageService = {
     }
   },
 
-  deleteReportRow(id: string): void {
+  async deleteReportRow(id: string): Promise<void> {
     this.markReportInitialized();
+    const rows = this.getReportRows();
+    const target = rows.find((r) => r.id === id);
+    const toRecord = [id];
+    if (target?.posSaleId) {
+      toRecord.push(target.posSaleId);
+    }
+    if (target?.receiptNo) {
+      toRecord.push(target.receiptNo);
+    }
+    this.recordDeletedReportRowIds(toRecord);
+
     try {
-      deleteDoc(doc(db, 'reportRows', id)).catch(() => {});
+      await deleteDoc(doc(db, 'reportRows', id));
     } catch (err) {
       console.warn('Firestore deleteReportRow failed:', err);
     }
 
-    const rows = this.getReportRows();
     const filtered = rows.filter((r) => r.id !== id);
     try {
       localStorage.setItem(STORAGE_KEY_REPORT_ROWS, JSON.stringify(filtered));

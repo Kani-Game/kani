@@ -216,7 +216,7 @@ export const POSPaymentModal: React.FC<POSPaymentModalProps> = ({
           await navigator.share({
             files: [imageFile],
             title: `${merchantTitle} - Bakong KHQR Payment`,
-            text: `Scan KHQR to pay $${totalUsd.toFixed(2)} (${totalKhr.toLocaleString()} ៛) • Ref: ${refCode}`,
+            text: 'Account ដែលទិញហើយមិនអាចដូរលុយ ឬ ដូរgameវិញបានទេ',
           });
           sharedViaNativeFile = true;
         } catch (shareErr: any) {
@@ -233,9 +233,7 @@ export const POSPaymentModal: React.FC<POSPaymentModalProps> = ({
             ? settings.qrCodeImage
             : defaultQrUrl;
 
-        const caption = `📸 *BAKONG KHQR PAYMENT*\n🏪 *${merchantTitle}*\n💰 *TOTAL DUE: $${totalUsd.toFixed(
-          2
-        )} (${totalKhr.toLocaleString()} ៛)*\n🔖 Ref: *${refCode}*\n\n👉 *Please scan this QR photo to complete payment!*`;
+        const caption = 'Account ដែលទិញហើយមិនអាចដូរលុយ ឬ ដូរgameវិញបានទេ';
 
         const telegramUrl = `https://t.me/share/url?url=${encodeURIComponent(
           publicPhotoUrl
@@ -252,9 +250,7 @@ export const POSPaymentModal: React.FC<POSPaymentModalProps> = ({
     } catch (err) {
       console.error('Failed to generate or share KHQR photo:', err);
       // Fallback: Open Telegram with QR link
-      const caption = `📸 *BAKONG KHQR PAYMENT*\n💰 *TOTAL DUE: $${totalUsd.toFixed(
-        2
-      )}*\n🔖 Ref: *${refCode}*`;
+      const caption = 'Account ដែលទិញហើយមិនអាចដូរលុយ ឬ ដូរgameវិញបានទេ';
       window.open(
         `https://t.me/share/url?url=${encodeURIComponent(defaultQrUrl)}&text=${encodeURIComponent(
           caption
