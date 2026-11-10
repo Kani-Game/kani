@@ -33,6 +33,7 @@ export const POSReceiptModal: React.FC<POSReceiptModalProps> = ({
       }
     });
     text += `\n*TOTAL USD: $${sale.totalUsd.toFixed(2)}*\n`;
+    text += `\n⚠️ Account ដែលទិញហើយមិនអាចដូរលុយ ឬ ដូរgameវិញបានទេ\n`;
     text += `Thank you for choosing Kani Game! 🎮`;
     return text;
   };
@@ -238,7 +239,7 @@ export const POSReceiptModal: React.FC<POSReceiptModalProps> = ({
                 </div>
               </div>
               <p className="font-semibold text-black">សូមអរគុណសម្រាប់ការគាំទ្រ!</p>
-              <p className="text-[9px] text-gray-400">Goods sold are non-refundable • Kani Game 168</p>
+              <p className="text-[10px] font-medium text-red-600">Account ដែលទិញហើយមិនអាចដូរលុយ ឬ ដូរgameវិញបានទេ</p>
             </div>
           </div>
         </div>

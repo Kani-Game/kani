@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Game, POSCartItem, POSSaleRecord, SiteSettings } from '../types/game';
+import { Game, POSCartItem, POSSaleRecord, SiteSettings, UserRole } from '../types/game';
 import { StorageService } from '../services/storageService';
 import { POSReceiptModal } from './POSReceiptModal';
 import { POSSalesHistoryModal } from './POSSalesHistoryModal';
@@ -15,6 +15,8 @@ interface POSTerminalProps {
   onDeleteProduct: (id: string) => void;
   onSwitchToStore: () => void;
   onSwitchToAdmin: () => void;
+  userRole?: UserRole;
+  currentUsername?: string;
   onLogout?: () => void;
   onShowToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
 }
@@ -28,6 +30,8 @@ export const POSTerminal: React.FC<POSTerminalProps> = ({
   onDeleteProduct: _onDeleteProduct,
   onSwitchToStore,
   onSwitchToAdmin,
+  userRole,
+  currentUsername,
   onLogout,
   onShowToast,
 }) => {
@@ -287,6 +291,32 @@ export const POSTerminal: React.FC<POSTerminalProps> = ({
             </button>
 
             {/* Switch to Storefront */}
+            {/* User Account Role Badge */}
+            {currentUsername && (
+              <div
+                className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border shadow-sm ${
+                  userRole === 'pos'
+                    ? 'bg-cyan-950/70 border-cyan-500/50 text-cyan-300'
+                    : 'bg-purple-950/70 border-purple-500/50 text-purple-300'
+                }`}
+                title={
+                  userRole === 'pos'
+                    ? 'គណនី POS Cashier (ប្រើបានតែ POS ទេ)'
+                    : 'គណនី Admin (សិទ្ធិពេញលេញ Admin + POS)'
+                }
+              >
+                <i className={`fa-solid ${userRole === 'pos' ? 'fa-cash-register' : 'fa-crown'} text-xs`}></i>
+                <span className="font-orbitron font-bold">
+                  {userRole === 'pos' ? `POS: ${currentUsername}` : `Admin: ${currentUsername}`}
+                </span>
+                {userRole === 'pos' && (
+                  <span className="text-[10px] px-1.5 py-0.2 bg-cyan-500/20 rounded font-mono text-cyan-200">
+                    POS ONLY
+                  </span>
+                )}
+              </div>
+            )}
+
             <button
               onClick={onSwitchToStore}
               className="px-3 sm:px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-gray-200 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
@@ -299,30 +329,51 @@ export const POSTerminal: React.FC<POSTerminalProps> = ({
             {/* Switch to Admin (Manage Products & Uploads) */}
             <button
               onClick={onSwitchToAdmin}
-              className="px-3 sm:px-3.5 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white border border-purple-400/40 text-xs font-semibold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
-              title="Open Admin Page to Upload Products & Manage Catalog"
+              className={`px-3 sm:px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition shadow-sm cursor-pointer ${
+                userRole === 'pos'
+                  ? 'bg-slate-800 hover:bg-slate-700 border border-slate-700 text-gray-300'
+                  : 'bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white border border-purple-400/40'
+              }`}
+              title={
+                userRole === 'pos'
+                  ? 'Admin Only: ចុចដើម្បី Login ដោយគណនី Admin'
+                  : 'Open Admin Page to Upload Products & Manage Catalog'
+              }
             >
-              <i className="fa-solid fa-cloud-arrow-up text-xs"></i>
+              <i className={`fa-solid ${userRole === 'pos' ? 'fa-lock text-yellow-400' : 'fa-cloud-arrow-up text-xs'}`}></i>
               <span>Admin & Uploads</span>
             </button>
 
-            {/* Financial Report (Google Sheet Style) */}
+            {/* Financial Report (Google Sheet Style) - Admin Only */}
             <button
-              onClick={() => setIsReportModalOpen(true)}
-              className="px-3 sm:px-3.5 py-2 rounded-xl bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/50 text-emerald-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-sm shadow-emerald-950/50"
-              title="Open Daily Financial Report (Google Sheet Style)"
+              onClick={() => {
+                if (userRole === 'pos') {
+                  onShowToast('គណនី POS មិនមានសិទ្ធិមើលរបាយការណ៍ហិរញ្ញវត្ថុទេ! (Admin Only)', 'error');
+                  return;
+                }
+                setIsReportModalOpen(true);
+              }}
+              className={`px-3 sm:px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shadow-sm ${
+                userRole === 'pos'
+                  ? 'bg-slate-800/80 border border-slate-700 text-gray-400 opacity-60 hover:opacity-100'
+                  : 'bg-emerald-950/60 hover:bg-emerald-900/80 border border-emerald-500/50 text-emerald-300 shadow-emerald-950/50'
+              }`}
+              title={
+                userRole === 'pos'
+                  ? 'Locked: របាយការណ៍ហិរញ្ញវត្ថុទាមទារសិទ្ធិ Admin'
+                  : 'Open Daily Financial Report (Google Sheet Style)'
+              }
             >
-              <i className="fa-solid fa-file-invoice-dollar text-emerald-400"></i>
+              <i className={`fa-solid ${userRole === 'pos' ? 'fa-lock text-amber-400' : 'fa-file-invoice-dollar text-emerald-400'}`}></i>
               <span>Financial Report (របាយការណ៍)</span>
             </button>
 
-
-            {/* Admin Logout */}
+            {/* Logout */}
             {onLogout && (
               <button
                 onClick={onLogout}
                 className="px-3 py-2 rounded-xl bg-red-950/40 hover:bg-red-900/60 border border-red-800/40 text-red-300 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
-                title="Logout of POS Cashier & Admin"
+                title="Logout"
               >
                 <i className="fa-solid fa-arrow-right-from-bracket text-xs"></i>
                 <span className="hidden sm:inline">Logout</span>

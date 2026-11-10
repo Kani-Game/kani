@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useId, useRef } from 'react';
-import { Game, SiteSettings } from '../types/game';
+import { Game, SiteSettings, UserAccountsConfig, UserRole } from '../types/game';
 import { StorageService } from '../services/storageService';
 import { POSUploadProductModal } from './POSUploadProductModal';
 import { POSMultiUploadModal } from './POSMultiUploadModal';
@@ -26,7 +26,7 @@ interface AdminDashboardProps {
   onRefreshGames?: () => void;
 }
 
-type AdminTab = 'games' | 'reports' | 'settings' | 'backup';
+type AdminTab = 'games' | 'reports' | 'settings' | 'users' | 'backup';
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   games,
@@ -85,10 +85,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setQrLabel(settings.qrCodeLabel || 'ABA PAY / KHQR');
   }, [settings]);
 
-  // Security Credentials State
-  const [newUsername, setNewUsername] = useState('admin');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  // User Accounts State (Admin & POS Cashier)
+  const [userAccounts, setUserAccounts] = useState<UserAccountsConfig>(() =>
+    StorageService.getUserAccounts()
+  );
+  const [adminUsername, setAdminUsername] = useState(userAccounts.admin.username);
+  const [adminPassword, setAdminPassword] = useState('');
+  const [adminConfirmPassword, setAdminConfirmPassword] = useState('');
+
+  const [posUsername, setPosUsername] = useState(userAccounts.pos.username);
+  const [posPassword, setPosPassword] = useState('');
+  const [posConfirmPassword, setPosConfirmPassword] = useState('');
+
+  const [showPasswords, setShowPasswords] = useState(false);
+
+  useEffect(() => {
+    const current = StorageService.getUserAccounts();
+    setUserAccounts(current);
+    setAdminUsername(current.admin.username);
+    setPosUsername(current.pos.username);
+
+    const unsub = StorageService.subscribeToUserAccounts((accs) => {
+      setUserAccounts(accs);
+      setAdminUsername(accs.admin.username);
+      setPosUsername(accs.pos.username);
+    });
+    return () => unsub();
+  }, []);
 
   // Confirmation Modals
   const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -303,32 +326,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     onShowToast('Settings saved successfully!');
   };
 
-  // Change Password
-  const handleChangePassword = (e: React.FormEvent) => {
+  // Update Admin Credentials
+  const handleSaveAdminCredentials = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newUsername.trim()) {
-      onShowToast('Username cannot be empty', 'error');
+    if (!adminUsername.trim()) {
+      onShowToast('Admin username មិនអាចទទេបានទេ!', 'error');
       return;
     }
-    if (newPassword && newPassword !== confirmPassword) {
-      onShowToast('Passwords do not match', 'error');
+    if (adminPassword && adminPassword !== adminConfirmPassword) {
+      onShowToast('Admin Passwords មិនដូចគ្នាទេ (Passwords do not match)', 'error');
       return;
     }
-    if (newPassword && newPassword.length < 6) {
-      onShowToast('Password must be at least 6 characters', 'error');
+    if (adminPassword && adminPassword.length < 4) {
+      onShowToast('Admin password ត្រូវមានយ៉ាងហោចណាស់ ៤ តួអក្សរ', 'error');
       return;
     }
 
-    const success = onUpdateCredentials(
-      newUsername.trim(),
-      newPassword || 'kanigame168'
-    );
-    if (success) {
-      onShowToast('Admin credentials updated successfully!');
-      setNewPassword('');
-      setConfirmPassword('');
+    const newPass = adminPassword.trim() || userAccounts.admin.passwordHash;
+    const ok = StorageService.updateUserAccount('admin', adminUsername.trim(), newPass);
+    if (ok) {
+      onShowToast('✅ បានកែប្រែ Username & Password របស់ Admin ជោគជ័យ!', 'success');
+      setAdminPassword('');
+      setAdminConfirmPassword('');
+      setUserAccounts(StorageService.getUserAccounts());
     } else {
-      onShowToast('Failed to update credentials', 'error');
+      onShowToast('មិនអាចកែប្រែបានទេ សូមសាកល្បងម្ដងទៀត', 'error');
+    }
+  };
+
+  // Update POS Cashier Credentials
+  const handleSavePosCredentials = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!posUsername.trim()) {
+      onShowToast('POS username មិនអាចទទេបានទេ!', 'error');
+      return;
+    }
+    if (posPassword && posPassword !== posConfirmPassword) {
+      onShowToast('POS Passwords មិនដូចគ្នាទេ (Passwords do not match)', 'error');
+      return;
+    }
+    if (posPassword && posPassword.length < 4) {
+      onShowToast('POS password ត្រូវមានយ៉ាងហោចណាស់ ៤ តួអក្សរ', 'error');
+      return;
+    }
+
+    const newPass = posPassword.trim() || userAccounts.pos.passwordHash;
+    const ok = StorageService.updateUserAccount('pos', posUsername.trim(), newPass);
+    if (ok) {
+      onShowToast('✅ បានកែប្រែ Username & Password របស់ POS Cashier ជោគជ័យ!', 'success');
+      setPosPassword('');
+      setPosConfirmPassword('');
+      setUserAccounts(StorageService.getUserAccounts());
+    } else {
+      onShowToast('មិនអាចកែប្រែបានទេ សូមសាកល្បងម្ដងទៀត', 'error');
     }
   };
 
@@ -380,6 +430,206 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       reader.readAsText(file);
     }
   };
+
+  const renderUserAccountsSection = () => (
+    <div className="bg-[#0f172a] p-6 sm:p-8 rounded-2xl border border-purple-500/40 shadow-2xl space-y-6">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-purple-900/40">
+        <div className="flex items-center gap-3">
+          <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-purple-600 to-cyan-500 flex items-center justify-center text-white shadow-neon-purple shrink-0">
+            <i className="fa-solid fa-users-gear text-lg"></i>
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="font-orbitron font-bold text-lg text-white">
+                USER ACCOUNTS & PASSWORDS (គ្រប់គ្រងគណនី ២)
+              </h3>
+              <span className="text-[10px] bg-emerald-500/20 text-emerald-300 font-mono px-2 py-0.5 rounded-full border border-emerald-500/40 font-semibold flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>Cloud Synced (Firestore)</span>
+              </span>
+            </div>
+            <p className="text-xs text-gray-400">
+              កំណត់ Username និង Password ដាច់ដោយឡែកសម្រាប់ Admin (Full) និង POS Cashier (POS Only)
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setShowPasswords(!showPasswords)}
+          className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-gray-300 text-xs font-semibold flex items-center gap-1.5 self-start sm:self-auto cursor-pointer transition border border-slate-700"
+        >
+          <i className={`fa-solid ${showPasswords ? 'fa-eye-slash' : 'fa-eye'} text-xs text-purple-400`}></i>
+          <span>{showPasswords ? 'Hide Passwords' : 'Show Passwords'}</span>
+        </button>
+      </div>
+
+      {/* Dual Cards Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* CARD 1: ADMIN ACCOUNT */}
+        <div className="bg-[#131b2e] p-5 sm:p-6 rounded-2xl border border-purple-500/40 shadow-lg flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-purple-900/40">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-purple-600/30 border border-purple-400/40 flex items-center justify-center text-purple-300">
+                  <i className="fa-solid fa-crown text-sm"></i>
+                </div>
+                <div>
+                  <h4 className="font-orbitron font-bold text-sm text-white flex items-center gap-2">
+                    <span>1. គណនី ADMIN</span>
+                  </h4>
+                  <span className="text-[10px] text-purple-300 font-mono">
+                    Current User: {userAccounts.admin.username}
+                  </span>
+                </div>
+              </div>
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                FULL ACCESS
+              </span>
+            </div>
+
+            <p className="text-[11px] text-gray-400 mb-4 bg-purple-950/40 p-2.5 rounded-xl border border-purple-900/40 leading-relaxed">
+              👑 <strong>សិទ្ធិពេញលេញ:</strong> អាចចូលគ្រប់គ្រងបានទាំង Admin Dashboard, របាយការណ៍ហិរញ្ញវត្ថុ, Catalog, ការកំណត់ និង POS Terminal។
+            </p>
+
+            <form onSubmit={handleSaveAdminCredentials} className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                  ADMIN USERNAME:
+                </label>
+                <input
+                  type="text"
+                  value={adminUsername}
+                  onChange={(e) => setAdminUsername(e.target.value)}
+                  placeholder="e.g. admin"
+                  className="w-full bg-[#0a0f1d] text-xs text-white rounded-xl px-3.5 py-2.5 border border-purple-500/30 focus:border-purple-400 outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                    NEW PASSWORD:
+                  </label>
+                  <input
+                    type={showPasswords ? 'text' : 'password'}
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                    placeholder="Leave empty to keep"
+                    className="w-full bg-[#0a0f1d] text-xs text-white rounded-xl px-3.5 py-2.5 border border-purple-500/30 focus:border-purple-400 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                    CONFIRM PASSWORD:
+                  </label>
+                  <input
+                    type={showPasswords ? 'text' : 'password'}
+                    value={adminConfirmPassword}
+                    onChange={(e) => setAdminConfirmPassword(e.target.value)}
+                    placeholder="Repeat new password"
+                    className="w-full bg-[#0a0f1d] text-xs text-white rounded-xl px-3.5 py-2.5 border border-purple-500/30 focus:border-purple-400 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-orbitron font-bold text-xs shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <i className="fa-solid fa-floppy-disk text-xs"></i>
+                  <span>SAVE ADMIN CREDENTIALS</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        {/* CARD 2: POS CASHIER ACCOUNT */}
+        <div className="bg-[#131b2e] p-5 sm:p-6 rounded-2xl border border-cyan-500/40 shadow-lg flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between gap-2 mb-3 pb-3 border-b border-cyan-900/40">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-cyan-600/30 border border-cyan-400/40 flex items-center justify-center text-cyan-300">
+                  <i className="fa-solid fa-cash-register text-sm"></i>
+                </div>
+                <div>
+                  <h4 className="font-orbitron font-bold text-sm text-white flex items-center gap-2">
+                    <span>2. គណនី POS CASHIER</span>
+                  </h4>
+                  <span className="text-[10px] text-cyan-300 font-mono">
+                    Current User: {userAccounts.pos.username}
+                  </span>
+                </div>
+              </div>
+              <span className="text-[10px] font-bold uppercase tracking-wider px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 border border-cyan-500/40">
+                POS ONLY
+              </span>
+            </div>
+
+            <p className="text-[11px] text-gray-400 mb-4 bg-cyan-950/40 p-2.5 rounded-xl border border-cyan-900/40 leading-relaxed">
+              🔒 <strong>សិទ្ធិប្រើតែ POS:</strong> គណនីនេះត្រូវបានចាក់សោរឱ្យប្រើប្រាស់បានតែ POS Terminal ប៉ុណ្ណោះ មិនអាចចូលមើល Admin ឬរបាយការណ៍ហិរញ្ញវត្ថុបានឡើយ។
+            </p>
+
+            <form onSubmit={handleSavePosCredentials} className="space-y-3">
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                  POS USERNAME:
+                </label>
+                <input
+                  type="text"
+                  value={posUsername}
+                  onChange={(e) => setPosUsername(e.target.value)}
+                  placeholder="e.g. pos or cashier"
+                  className="w-full bg-[#0a0f1d] text-xs text-white rounded-xl px-3.5 py-2.5 border border-cyan-500/30 focus:border-cyan-400 outline-none"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                    NEW PASSWORD:
+                  </label>
+                  <input
+                    type={showPasswords ? 'text' : 'password'}
+                    value={posPassword}
+                    onChange={(e) => setPosPassword(e.target.value)}
+                    placeholder="Leave empty to keep"
+                    className="w-full bg-[#0a0f1d] text-xs text-white rounded-xl px-3.5 py-2.5 border border-cyan-500/30 focus:border-cyan-400 outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-semibold text-gray-300 mb-1">
+                    CONFIRM PASSWORD:
+                  </label>
+                  <input
+                    type={showPasswords ? 'text' : 'password'}
+                    value={posConfirmPassword}
+                    onChange={(e) => setPosConfirmPassword(e.target.value)}
+                    placeholder="Repeat new password"
+                    className="w-full bg-[#0a0f1d] text-xs text-white rounded-xl px-3.5 py-2.5 border border-cyan-500/30 focus:border-cyan-400 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-orbitron font-bold text-xs shadow-md transition flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <i className="fa-solid fa-floppy-disk text-xs"></i>
+                  <span>SAVE POS CREDENTIALS</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-[#080b11] text-gray-100 pb-20">
@@ -446,6 +696,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span>QR Upload</span>
               </button>
 
+              {/* DIRECT ACCESS TO USERS & PASSWORDS */}
+              <button
+                type="button"
+                onClick={() => setActiveTab('users')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-orbitron font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer border ${
+                  activeTab === 'users'
+                    ? 'bg-purple-600 text-white border-purple-400 shadow-neon-purple ring-1 ring-yellow-400'
+                    : 'bg-[#131b2e] hover:bg-slate-800 text-yellow-300 border-yellow-500/40 hover:text-white'
+                }`}
+                title="កែប្រែ Username & Password សម្រាប់ Admin & POS"
+              >
+                <i className="fa-solid fa-key text-xs text-yellow-400"></i>
+                <span>Users & PW (កែប្រែគណនី)</span>
+              </button>
+
               {onOpenPos && (
                 <button
                   type="button"
@@ -465,7 +730,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <i className="fa-solid fa-store"></i>
                 <span>View Storefront</span>
               </button>
-
 
               <button
                 onClick={onLogout}
@@ -516,6 +780,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </button>
             )}
 
+            {/* TAB: USERS & PASSWORDS (PROMINENT TAB) */}
+            <button
+              onClick={() => setActiveTab('users')}
+              className={`px-4 py-2 rounded-lg text-xs font-rajdhani font-bold tracking-wider flex items-center gap-2 transition flex-shrink-0 cursor-pointer ${
+                activeTab === 'users'
+                  ? 'bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 text-white shadow-md shadow-purple-950/60 ring-2 ring-yellow-400/70'
+                  : 'text-yellow-300 hover:text-white hover:bg-purple-900/30 border border-yellow-500/40'
+              }`}
+            >
+              <i className="fa-solid fa-users-gear text-yellow-400"></i>
+              <span>🔑 USERS & PASSWORDS (គណនី ២)</span>
+            </button>
+
             <button
               onClick={() => setActiveTab('settings')}
               className={`px-4 py-2 rounded-lg text-xs font-rajdhani font-bold tracking-wider flex items-center gap-2 transition flex-shrink-0 cursor-pointer ${
@@ -525,7 +802,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               }`}
             >
               <i className="fa-solid fa-gear"></i>
-              <span>TELEGRAM & PORTAL SETTINGS</span>
+              <span>⚙️ SETTINGS (ការកំណត់ទូទៅ & TELEGRAM)</span>
             </button>
 
             <button
@@ -969,6 +1246,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       onChange={handleSingleImageUpload}
                       className="hidden"
                     />
+
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          if (navigator.clipboard?.readText) {
+                            const text = await navigator.clipboard.readText();
+                            if (text && text.trim()) {
+                              setFormImg(text.trim());
+                              setPreviewError(false);
+                              onShowToast('Image URL pasted from clipboard!', 'success');
+                              return;
+                            }
+                          }
+                        } catch {
+                          // fallback
+                        }
+                        onShowToast('Please press Ctrl+V inside the URL box above', 'info');
+                      }}
+                      className="cursor-pointer px-3 py-1.5 rounded-lg bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-500/40 text-cyan-200 text-xs font-semibold flex items-center gap-1.5 transition"
+                      title="Paste image link from clipboard"
+                    >
+                      <i className="fa-solid fa-paste text-cyan-400 text-xs"></i>
+                      <span>Paste URL</span>
+                    </button>
                   </div>
                 </div>
 
@@ -986,10 +1288,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <div>
                   <label className="block text-xs font-semibold text-gray-300 mb-1">DESCRIPTION</label>
                   <textarea
-                    rows={2}
+                    rows={6}
                     value={formDesc}
                     onChange={(e) => setFormDesc(e.target.value)}
-                    className="w-full bg-[#131b2e] text-xs text-gray-200 rounded-xl px-3 py-2 border border-purple-900/50 outline-none resize-none"
+                    placeholder="Product description... (Supports multi-line text)"
+                    className="w-full bg-[#131b2e] text-xs text-gray-200 rounded-xl px-3 py-2 border border-purple-900/50 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/40 outline-none leading-relaxed"
                   />
                 </div>
 
@@ -1018,9 +1321,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <DailyFinancialReport onShowToast={onShowToast} />
         )}
 
-        {/* TAB 3: TELEGRAM & PORTAL SETTINGS */}
+        {/* TAB: USERS & PASSWORDS MANAGER (DEDICATED FULL TAB) */}
+        {activeTab === 'users' && (
+          <div className="max-w-5xl mx-auto space-y-6">
+            {renderUserAccountsSection()}
+          </div>
+        )}
+
+        {/* TAB: SETTINGS & TELEGRAM */}
         {activeTab === 'settings' && (
           <div className="max-w-4xl mx-auto space-y-8">
+            {/* Quick Banner to jump to Users & Passwords Tab */}
+            <div className="bg-gradient-to-r from-purple-950/90 via-[#131b2e] to-indigo-950/90 p-4 sm:p-5 rounded-2xl border-2 border-yellow-500/50 shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-yellow-500/20 border border-yellow-500/40 flex items-center justify-center text-yellow-300 text-lg shrink-0">
+                  <i className="fa-solid fa-key"></i>
+                </div>
+                <div>
+                  <h4 className="font-orbitron font-bold text-sm text-yellow-300">
+                    USER ACCOUNTS & PASSWORDS (គ្រប់គ្រងគណនី ២)
+                  </h4>
+                  <p className="text-xs text-gray-300">
+                    កំណត់ Username និង Password សម្រាប់ Admin (Full Access) និង POS Cashier (POS Only)
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setActiveTab('users')}
+                className="px-4 py-2 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 hover:to-amber-500 text-black font-orbitron font-bold text-xs shadow-md transition flex items-center gap-2 cursor-pointer shrink-0"
+              >
+                <span>បើកផ្ទាំងគណនី (USERS & PW)</span>
+                <i className="fa-solid fa-arrow-right text-xs"></i>
+              </button>
+            </div>
             {/* General Site & Telegram Settings Form */}
             <div className="bg-[#0f172a] p-6 sm:p-8 rounded-2xl border border-purple-500/40 shadow-2xl">
               <div className="flex items-center gap-3 mb-6 pb-4 border-b border-purple-900/40">
@@ -1203,73 +1537,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </div>
 
-            {/* Admin Security & Password Change */}
-            <div className="bg-[#0f172a] p-6 sm:p-8 rounded-2xl border border-purple-500/40 shadow-2xl">
-              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-purple-900/40">
-                <i className="fa-solid fa-shield-halved text-purple-400 text-2xl"></i>
-                <div>
-                  <h3 className="font-orbitron font-bold text-lg text-white">
-                    CHANGE ADMIN CREDENTIALS
-                  </h3>
-                  <p className="text-xs text-gray-400">
-                    Update your dashboard username and password anytime for security.
-                  </p>
-                </div>
-              </div>
-
-              <form onSubmit={handleChangePassword} className="space-y-4">
-                <div>
-                  <label className="block text-xs font-semibold text-gray-300 mb-1">
-                    ADMIN USERNAME
-                  </label>
-                  <input
-                    type="text"
-                    value={newUsername}
-                    onChange={(e) => setNewUsername(e.target.value)}
-                    placeholder="Enter username"
-                    className="w-full bg-[#131b2e] text-xs text-gray-200 rounded-xl px-4 py-2.5 border border-purple-900/50 outline-none focus:border-purple-500"
-                  />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-300 mb-1">
-                      NEW PASSWORD
-                    </label>
-                    <input
-                      type="password"
-                      value={newPassword}
-                      onChange={(e) => setNewPassword(e.target.value)}
-                      placeholder="Enter new secure password"
-                      className="w-full bg-[#131b2e] text-xs text-gray-200 rounded-xl px-4 py-2.5 border border-purple-900/50 outline-none focus:border-purple-500"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-semibold text-gray-300 mb-1">
-                      CONFIRM NEW PASSWORD
-                    </label>
-                    <input
-                      type="password"
-                      value={confirmPassword}
-                      onChange={(e) => setConfirmPassword(e.target.value)}
-                      placeholder="Repeat new password"
-                      className="w-full bg-[#131b2e] text-xs text-gray-200 rounded-xl px-4 py-2.5 border border-purple-900/50 outline-none focus:border-purple-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="pt-2">
-                  <button
-                    type="submit"
-                    className="px-6 py-2.5 rounded-xl bg-purple-700 hover:bg-purple-600 text-white font-orbitron font-bold text-xs shadow-md transition flex items-center gap-2 cursor-pointer"
-                  >
-                    <i className="fa-solid fa-key"></i>
-                    <span>UPDATE CREDENTIALS</span>
-                  </button>
-                </div>
-              </form>
-            </div>
+            {/* User Accounts & Role Permissions (Admin & POS) */}
+            {renderUserAccountsSection()}
           </div>
         )}
 

@@ -4,7 +4,7 @@
  */
 
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { Game, GameTab, SiteSettings } from './types/game';
+import { Game, GameTab, SiteSettings, UserRole } from './types/game';
 import { StorageService } from './services/storageService';
 import { Header } from './components/Header';
 import { HeroBanner } from './components/HeroBanner';
@@ -96,6 +96,12 @@ export default function App() {
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [loginTarget, setLoginTarget] = useState<'admin' | 'pos'>('admin');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(() =>
+    StorageService.getCurrentUserRole()
+  );
+  const [currentUsername, setCurrentUsername] = useState<string>(
+    () => StorageService.getAuthSession()?.username || ''
+  );
 
   // Toasts
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -127,6 +133,9 @@ export default function App() {
       setSettings(cloudSettings);
     });
 
+    // Real-Time Cloud Firestore Sync for Financial Report Rows (keeps local cache fresh across all tabs)
+    const unsubscribeCloudReportRows = StorageService.subscribeToReportRows(() => {});
+
     const initialTab = getTabFromUrl();
     const initialPos = getIsPosFromUrl();
     const initialAdmin = getIsAdminFromUrl();
@@ -134,8 +143,16 @@ export default function App() {
 
     if (initialAdmin) {
       if (authenticated) {
-        setIsAdminView(true);
-        setIsPosView(false);
+        const role = StorageService.getCurrentUserRole();
+        if (role === 'pos') {
+          setIsAdminView(false);
+          setIsPosView(true);
+          window.location.hash = '#pos';
+          showToast('គណនី POS មិនមានសិទ្ធិចូល Admin ទេ! មានសិទ្ធិប្រើបានតែ POS ប៉ុណ្ណោះ', 'error');
+        } else {
+          setIsAdminView(true);
+          setIsPosView(false);
+        }
       } else {
         setIsAdminView(false);
         setIsPosView(false);
@@ -167,13 +184,23 @@ export default function App() {
       const posFromUrl = getIsPosFromUrl();
       const adminFromUrl = getIsAdminFromUrl();
       const isAuth = StorageService.isLoggedIn();
+      const role = StorageService.getCurrentUserRole();
       setIsLoggedIn(isAuth);
+      setCurrentUserRole(role);
+      setCurrentUsername(StorageService.getAuthSession()?.username || '');
       setActiveTab(tabFromUrl);
 
       if (adminFromUrl) {
         if (isAuth) {
-          setIsAdminView(true);
-          setIsPosView(false);
+          if (role === 'pos') {
+            setIsAdminView(false);
+            setIsPosView(true);
+            window.location.hash = '#pos';
+            showToast('គណនី POS មិនមានសិទ្ធិចូល Admin ទេ! មានសិទ្ធិប្រើបានតែ POS ប៉ុណ្ណោះ', 'error');
+          } else {
+            setIsAdminView(true);
+            setIsPosView(false);
+          }
         } else {
           setIsAdminView(false);
           setIsPosView(false);
@@ -208,10 +235,17 @@ export default function App() {
       ) {
         e.preventDefault();
         const isAuth = StorageService.isLoggedIn();
+        const role = StorageService.getCurrentUserRole();
         if (isAuth) {
-          setIsAdminView(true);
-          setIsPosView(false);
-          showToast('🔓 Switched to Admin Dashboard (Secret Shortcut)', 'info');
+          if (role === 'pos') {
+            showToast('គណនី POS មិនមានសិទ្ធិចូល Admin ទេ! សូម Login ដោយគណនី Admin', 'error');
+            setLoginTarget('admin');
+            setIsLoginModalOpen(true);
+          } else {
+            setIsAdminView(true);
+            setIsPosView(false);
+            showToast('🔓 Switched to Admin Dashboard (Secret Shortcut)', 'info');
+          }
         } else {
           setLoginTarget('admin');
           setIsLoginModalOpen(true);
@@ -225,6 +259,7 @@ export default function App() {
     return () => {
       unsubscribeCloudGames();
       unsubscribeCloudSettings();
+      unsubscribeCloudReportRows();
       window.removeEventListener('hashchange', syncFromUrl);
       window.removeEventListener('popstate', syncFromUrl);
       window.removeEventListener('keydown', handleKeyDown);
@@ -260,6 +295,13 @@ export default function App() {
       setIsLoginModalOpen(true);
       return;
     }
+    const role = StorageService.getCurrentUserRole();
+    if (role === 'pos') {
+      showToast('គណនី POS មិនមានសិទ្ធិចូល Admin ទេ! សូម Login ដោយប្រើគណនី Admin', 'error');
+      setLoginTarget('admin');
+      setIsLoginModalOpen(true);
+      return;
+    }
     setIsPosView(false);
     setIsAdminView(true);
   };
@@ -267,10 +309,17 @@ export default function App() {
   // Secret Admin / POS triggers (for 5-tap gesture on logo or footer)
   const handleSecretTrigger = () => {
     const isAuth = StorageService.isLoggedIn();
+    const role = StorageService.getCurrentUserRole();
     if (isAuth) {
-      setIsAdminView(true);
-      setIsPosView(false);
-      showToast('🔓 Switched to Admin Dashboard', 'info');
+      if (role === 'pos') {
+        showToast('គណនី POS មិនមានសិទ្ធិចូល Admin ទេ! សូម Login ដោយគណនី Admin', 'error');
+        setLoginTarget('admin');
+        setIsLoginModalOpen(true);
+      } else {
+        setIsAdminView(true);
+        setIsPosView(false);
+        showToast('🔓 Switched to Admin Dashboard', 'info');
+      }
     } else {
       setLoginTarget('admin');
       setIsLoginModalOpen(true);
@@ -429,36 +478,49 @@ export default function App() {
     showToast('កំពុងបញ្ជូនទៅកាន់ Telegram...');
   };
 
-  // Admin Actions
+  // Admin & POS Authentication Actions
   const handleAdminLogin = (u: string, p: string) => {
-    const success = StorageService.login(u, p);
-    if (success) {
+    const result = StorageService.login(u, p);
+    if (result.success) {
       setIsLoggedIn(true);
+      setCurrentUserRole(result.role || 'admin');
+      setCurrentUsername(result.username || u);
     }
-    return success;
+    return result;
   };
 
-  const handleAdminLoginSuccess = (destination: 'admin' | 'pos') => {
+  const handleAdminLoginSuccess = (destination: 'admin' | 'pos', role?: UserRole) => {
     setIsLoggedIn(true);
-    if (destination === 'pos') {
+    const activeRole = role || StorageService.getCurrentUserRole() || 'admin';
+    setCurrentUserRole(activeRole);
+    setCurrentUsername(StorageService.getAuthSession()?.username || '');
+
+    if (activeRole === 'pos' || destination === 'pos') {
       setIsAdminView(false);
       setIsPosView(true);
       window.location.hash = '#pos';
-      showToast('ចូលប្រើប្រាស់ POS Cashier Terminal បានជោគជ័យ!', 'success');
+      if (activeRole === 'pos' && destination === 'admin') {
+        showToast('គណនី POS ត្រូវបានកំណត់ឱ្យប្រើប្រាស់តែលើ POS Terminal ប៉ុណ្ណោះ!', 'info');
+      } else {
+        showToast('ចូលប្រើប្រាស់ POS Cashier Terminal បានជោគជ័យ!', 'success');
+      }
     } else {
       setIsPosView(false);
       setIsAdminView(true);
-      showToast('Welcome to Kani Game Admin Dashboard & POS!', 'success');
+      window.location.hash = '#admin';
+      showToast('Welcome to Kani Game Admin Dashboard!', 'success');
     }
   };
 
   const handleAdminLogout = () => {
     StorageService.logout();
     setIsLoggedIn(false);
+    setCurrentUserRole(null);
+    setCurrentUsername('');
     setIsAdminView(false);
     setIsPosView(false);
     window.location.hash = activeTab === 'steam' ? '#steam' : '#external';
-    showToast('Admin logged out.');
+    showToast('Logged out successfully.');
   };
 
   const handleSaveGame = (gameData: Omit<Game, 'id'> & { id?: string }) => {
@@ -615,9 +677,19 @@ export default function App() {
             window.location.hash = activeTab === 'steam' ? '#steam' : '#external';
           }}
           onSwitchToAdmin={() => {
+            const role = StorageService.getCurrentUserRole();
+            if (role === 'pos') {
+              showToast('គណនី POS មិនមានសិទ្ធិចូល Admin ទេ! សូម Login ដោយប្រើគណនី Admin', 'error');
+              setLoginTarget('admin');
+              setIsLoginModalOpen(true);
+              return;
+            }
             setIsPosView(false);
             setIsAdminView(true);
+            window.location.hash = '#admin';
           }}
+          userRole={currentUserRole || StorageService.getCurrentUserRole() || undefined}
+          currentUsername={currentUsername || StorageService.getAuthSession()?.username || undefined}
           onLogout={handleAdminLogout}
           onShowToast={showToast}
         />

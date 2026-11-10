@@ -1,10 +1,18 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { UserRole } from '../types/game';
+
+interface LoginResult {
+  success: boolean;
+  role?: UserRole;
+  username?: string;
+  error?: string;
+}
 
 interface AdminLoginModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onLogin: (user: string, pass: string) => boolean;
-  onLoginSuccess: (destination: 'admin' | 'pos') => void;
+  onLogin: (user: string, pass: string) => LoginResult;
+  onLoginSuccess: (destination: 'admin' | 'pos', role?: UserRole) => void;
   targetDestination?: 'admin' | 'pos';
 }
 
@@ -15,7 +23,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   onLoginSuccess,
   targetDestination = 'admin',
 }) => {
-  const [username, setUsername] = useState('admin');
+  const [username, setUsername] = useState(targetDestination === 'pos' ? 'pos' : 'admin');
   const [password, setPassword] = useState('');
   const [destination, setDestination] = useState<'admin' | 'pos'>(targetDestination);
   const [showPassword, setShowPassword] = useState(false);
@@ -28,6 +36,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
       setPassword('');
       setError(null);
       setDestination(targetDestination);
+      setUsername(targetDestination === 'pos' ? 'pos' : 'admin');
       setTimeout(() => {
         passwordInputRef.current?.focus();
       }, 100);
@@ -41,18 +50,24 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
     setError(null);
 
     if (!password.trim()) {
-      setError('Please enter your admin password.');
+      setError('សូមបញ្ចូល Password របស់អ្នក (Please enter password)');
       return;
     }
 
-    const success = onLogin(username.trim() || 'admin', password);
-    if (success) {
+    const result = onLogin(username.trim(), password);
+    if (result.success) {
+      // If user logged in with POS account but requested Admin Panel, enforce POS-only restriction
+      if (result.role === 'pos' && destination === 'admin') {
+        setError('គណនី POS ត្រូវបានកំណត់ឱ្យប្រើប្រាស់តែលើ POS Terminal ប៉ុណ្ណោះ! (មិនមានសិទ្ធិចូល Admin ទេ)');
+        return;
+      }
+
       setPassword('');
       setError(null);
-      onLoginSuccess(destination);
+      onLoginSuccess(result.role === 'pos' ? 'pos' : destination, result.role);
       onClose();
     } else {
-      setError('Incorrect username or password. Please try again.');
+      setError(result.error || 'Username ឬ Password មិនត្រឹមត្រូវទេ! (Incorrect credentials)');
     }
   };
 
@@ -96,7 +111,10 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
         <div className="grid grid-cols-2 gap-2 mb-4 p-1 bg-[#131b2e] rounded-xl border border-purple-900/40">
           <button
             type="button"
-            onClick={() => setDestination('pos')}
+            onClick={() => {
+              setDestination('pos');
+              if (username === 'admin') setUsername('pos');
+            }}
             className={`py-2 px-3 rounded-lg text-xs font-orbitron font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
               destination === 'pos'
                 ? 'bg-gradient-to-r from-cyan-600 to-blue-600 text-white shadow-md'
@@ -104,11 +122,14 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
             }`}
           >
             <i className="fa-solid fa-cash-register text-xs"></i>
-            <span>POS Cashier</span>
+            <span>POS Cashier (POS Only)</span>
           </button>
           <button
             type="button"
-            onClick={() => setDestination('admin')}
+            onClick={() => {
+              setDestination('admin');
+              if (username === 'pos') setUsername('admin');
+            }}
             className={`py-2 px-3 rounded-lg text-xs font-orbitron font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
               destination === 'admin'
                 ? 'bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-md'
@@ -116,7 +137,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
             }`}
           >
             <i className="fa-solid fa-shield-halved text-xs"></i>
-            <span>Admin Panel</span>
+            <span>Admin Panel (Full)</span>
           </button>
         </div>
 

@@ -220,7 +220,16 @@ export async function generateKhqrCardBlob(
   ctx.fillText(
     `Order Total: $${data.totalUsd.toFixed(2)} (${data.totalKhr.toLocaleString()} ៛) • ${data.itemCount} Item(s)`,
     width / 2,
-    745
+    742
+  );
+
+  // Store Policy Note in Khmer
+  ctx.fillStyle = '#DC2626';
+  ctx.font = 'bold 13px "Kantumruy Pro", "Battambang", "Inter", sans-serif';
+  ctx.fillText(
+    'Account ដែលទិញហើយមិនអាចដូរលុយ ឬ ដូរgameវិញបានទេ',
+    width / 2,
+    774
   );
 
   ctx.fillStyle = '#94A3B8';
@@ -228,7 +237,7 @@ export async function generateKhqrCardBlob(
   ctx.fillText(
     'Kani Game Official POS Billing System • Valid for 10 Minutes',
     width / 2,
-    775
+    804
   );
 
   // Return PNG Blob & Data URL

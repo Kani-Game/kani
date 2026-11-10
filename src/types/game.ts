@@ -119,9 +119,28 @@ export interface SiteSettings {
   qrCodeLabel?: string; // Label for QR code e.g. 'ABA PAY / KHQR'
 }
 
+export type UserRole = 'admin' | 'pos';
+
+export interface UserAccount {
+  id: 'admin' | 'pos';
+  role: UserRole;
+  username: string;
+  passwordHash: string;
+  displayName: string;
+  updatedAt?: string;
+}
+
+export interface UserAccountsConfig {
+  admin: UserAccount;
+  pos: UserAccount;
+}
+
 export interface AdminAuth {
   isAuthenticated: boolean;
   username: string;
+  role: UserRole;
+  displayName?: string;
   token?: string;
+  loginTime?: string;
 }
 

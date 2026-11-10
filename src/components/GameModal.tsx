@@ -85,14 +85,9 @@ export const GameModal: React.FC<GameModalProps> = ({
           </div>
 
 
-          <h3 className="font-orbitron text-2xl sm:text-3xl font-extrabold text-white leading-tight mb-3">
+          <h3 className="font-orbitron text-2xl sm:text-3xl font-extrabold text-white leading-tight mb-5">
             {game.name}
           </h3>
-
-          <p className="text-gray-300 text-sm leading-relaxed mb-6">
-            {game.description ||
-              `${game.name} - សូមជ្រើសរើស Game នេះដើម្បីផ្ញើឈ្មោះទៅកាន់ Telegram របស់ Kani Game Admin។`}
-          </p>
 
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row gap-3">

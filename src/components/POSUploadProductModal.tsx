@@ -62,6 +62,14 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
     editingProduct?.img ||
       'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=600&auto=format&fit=crop&q=80'
   );
+  const [urlInputVal, setUrlInputVal] = useState(
+    editingProduct?.img && editingProduct.img.startsWith('http') ? editingProduct.img : ''
+  );
+  const [pasteFeedback, setPasteFeedback] = useState<{
+    type: 'success' | 'error' | 'info';
+    text: string;
+  } | null>(null);
+  const [validationError, setValidationError] = useState<string | null>(null);
   const [barcode, setBarcode] = useState(
     editingProduct?.barcode ||
       `SKU-${Math.floor(100000 + Math.random() * 900000)}`
@@ -76,6 +84,7 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
   const [isUploadingFile, setIsUploadingFile] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const urlInputRef = useRef<HTMLInputElement>(null);
 
   if (!isOpen) return null;
 
@@ -87,23 +96,140 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
     setBarcode(randomSku);
   };
 
+  const handleApplyUrl = (rawUrl: string) => {
+    const clean = rawUrl.trim();
+    if (!clean) return;
+    setUrlInputVal(clean);
+    setImg(clean);
+    setImgError(false);
+    setValidationError(null);
+    setPasteFeedback({ type: 'success', text: '✅ បាន Paste Link រូបភាពជោគជ័យ!' });
+    setTimeout(() => setPasteFeedback(null), 3500);
+  };
+
+  const handlePasteUrlOrClipboard = async () => {
+    setValidationError(null);
+    // 1. Try reading directly from modern clipboard API
+    try {
+      // Check for copied image blob (e.g. screenshot, image from web)
+      if (navigator.clipboard?.read) {
+        try {
+          const items = await navigator.clipboard.read();
+          for (const item of items) {
+            const imgType = item.types.find((t) => t.startsWith('image/'));
+            if (imgType) {
+              const blob = await item.getType(imgType);
+              const reader = new FileReader();
+              reader.onload = (ev) => {
+                const res = ev.target?.result as string;
+                if (res) {
+                  setImg(res);
+                  setUrlInputVal('');
+                  setImgError(false);
+                  setPasteFeedback({
+                    type: 'success',
+                    text: '✅ បាន Paste រូបភាព (Image File) ពី Clipboard ជោគជ័យ!',
+                  });
+                  setTimeout(() => setPasteFeedback(null), 3500);
+                }
+              };
+              reader.readAsDataURL(blob);
+              return;
+            }
+          }
+        } catch {
+          // If read() fails or lacks permission, continue to readText()
+        }
+      }
+
+      // Check for copied text URL
+      if (navigator.clipboard?.readText) {
+        const text = await navigator.clipboard.readText();
+        const clean = text.trim();
+        if (clean) {
+          handleApplyUrl(clean);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn('Clipboard read error or permission denied:', err);
+    }
+
+    // 2. Fallback: focus input so user can press Ctrl+V directly
+    urlInputRef.current?.focus();
+    urlInputRef.current?.select();
+    setPasteFeedback({
+      type: 'info',
+      text: 'សូមចុច Ctrl+V (ឬ Right-click > Paste) ក្នុងប្រអប់ URL ខាងក្រោម',
+    });
+  };
+
+  const handleModalPaste = (e: React.ClipboardEvent) => {
+    // If an image file was copied to clipboard, load it immediately
+    const items = e.clipboardData?.items;
+    if (items) {
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].type.startsWith('image/')) {
+          const file = items[i].getAsFile();
+          if (file) {
+            e.preventDefault();
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+              const res = ev.target?.result as string;
+              if (res) {
+                setImg(res);
+                setUrlInputVal('');
+                setImgError(false);
+                setPasteFeedback({
+                  type: 'success',
+                  text: '✅ បាន Paste រូបភាពពី Clipboard ជោគជ័យ!',
+                });
+                setTimeout(() => setPasteFeedback(null), 3500);
+              }
+            };
+            reader.readAsDataURL(file);
+            return;
+          }
+        }
+      }
+    }
+
+    // If active element is not an input/textarea and text is an image URL, auto-apply it
+    const activeEl = document.activeElement?.tagName?.toLowerCase();
+    if (activeEl !== 'input' && activeEl !== 'textarea') {
+      const pastedText = e.clipboardData?.getData('text')?.trim();
+      if (
+        pastedText &&
+        (pastedText.startsWith('http://') ||
+          pastedText.startsWith('https://') ||
+          pastedText.startsWith('data:image/'))
+      ) {
+        e.preventDefault();
+        handleApplyUrl(pastedText);
+      }
+    }
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       if (file.size > 15 * 1024 * 1024) {
-        alert('File size too large (max 15MB)');
+        setValidationError('File size ធំពេក (អតិបរមា 15MB)');
         return;
       }
       setIsUploadingFile(true);
+      setValidationError(null);
       try {
         const compressedBase64 = await compressImageFile(file, 640, 850, 0.82);
         setImg(compressedBase64);
+        setUrlInputVal('');
         setImgError(false);
       } catch (err) {
         console.error('Image compression failed', err);
         const reader = new FileReader();
         reader.onload = (event) => {
           setImg(event.target?.result as string);
+          setUrlInputVal('');
           setImgError(false);
         };
         reader.readAsDataURL(file);
@@ -116,7 +242,7 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
-      alert('សូមបញ្ចូលឈ្មោះ Game ឬ Product!');
+      setValidationError('សូមបញ្ចូលឈ្មោះ Game ឬ Product!');
       return;
     }
 
@@ -145,6 +271,7 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-md overflow-y-auto animate-in fade-in duration-200"
       onClick={onClose}
+      onPaste={handleModalPaste}
     >
       <div
         className="relative w-full max-w-3xl bg-[#0f172a] border border-purple-500/40 rounded-2xl shadow-2xl overflow-hidden my-6 flex flex-col max-h-[92vh]"
@@ -494,8 +621,8 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
                 </div>
               </div>
 
-              {/* Upload Buttons */}
-              <div className="space-y-2">
+              {/* Upload Buttons & Direct URL Input */}
+              <div className="space-y-2.5">
                 <input
                   type="file"
                   ref={fileInputRef}
@@ -517,18 +644,85 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
 
                   <button
                     type="button"
-                    onClick={() => {
-                      const url = prompt('Enter Image URL:');
-                      if (url) {
-                        setImg(url.trim());
-                        setImgError(false);
-                      }
-                    }}
-                    className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-gray-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer"
+                    onClick={handlePasteUrlOrClipboard}
+                    className="py-2 px-3.5 rounded-xl bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-500/40 text-cyan-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition cursor-pointer shadow-sm hover:shadow-cyan-500/20"
+                    title="Click to paste image URL or copied image directly from clipboard"
                   >
-                    <i className="fa-solid fa-link"></i>
-                    <span>Paste URL</span>
+                    <i className="fa-solid fa-paste text-cyan-400"></i>
+                    <span>Paste Clipboard / URL</span>
                   </button>
+                </div>
+
+                {/* Direct Image URL Input Box */}
+                <div className="bg-[#131b2e]/70 p-2.5 rounded-xl border border-purple-900/40 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-semibold text-gray-300 flex items-center gap-1.5">
+                      <i className="fa-solid fa-link text-cyan-400 text-xs"></i>
+                      <span>Or Paste Photo URL (Direct Link)</span>
+                    </label>
+                    {img && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setImg('');
+                          setUrlInputVal('');
+                          setImgError(false);
+                        }}
+                        className="text-[10px] text-gray-400 hover:text-rose-400 transition cursor-pointer"
+                      >
+                        Clear image
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="relative flex items-center">
+                    <input
+                      ref={urlInputRef}
+                      type="url"
+                      value={urlInputVal}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setUrlInputVal(val);
+                        setImg(val.trim());
+                        setImgError(false);
+                        setValidationError(null);
+                      }}
+                      placeholder="Paste image link here (https://... or press Ctrl+V)"
+                      className="w-full bg-[#0a0f1d] text-xs text-white placeholder-gray-500 rounded-lg pl-3 pr-20 py-2 border border-purple-500/30 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/50 outline-none transition"
+                    />
+                    <button
+                      type="button"
+                      onClick={handlePasteUrlOrClipboard}
+                      className="absolute right-1 px-2.5 py-1 rounded-md bg-cyan-600/30 hover:bg-cyan-500/50 border border-cyan-400/40 text-cyan-200 text-[11px] font-semibold flex items-center gap-1 transition cursor-pointer"
+                      title="Paste from clipboard"
+                    >
+                      <i className="fa-solid fa-paste text-[10px]"></i>
+                      <span>Paste</span>
+                    </button>
+                  </div>
+
+                  {pasteFeedback && (
+                    <div
+                      className={`text-[11px] px-2 py-1 rounded-md flex items-center gap-1.5 ${
+                        pasteFeedback.type === 'error'
+                          ? 'bg-rose-950/60 border border-rose-500/40 text-rose-300'
+                          : pasteFeedback.type === 'success'
+                          ? 'bg-emerald-950/60 border border-emerald-500/40 text-emerald-300'
+                          : 'bg-cyan-950/60 border border-cyan-500/40 text-cyan-300'
+                      }`}
+                    >
+                      <i
+                        className={`fa-solid ${
+                          pasteFeedback.type === 'error'
+                            ? 'fa-circle-exclamation'
+                            : pasteFeedback.type === 'success'
+                            ? 'fa-check'
+                            : 'fa-circle-info'
+                        } text-xs`}
+                      ></i>
+                      <span>{pasteFeedback.text}</span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Preset Fast Image Picks */}
@@ -541,7 +735,9 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
                         type="button"
                         onClick={() => {
                           setImg(preset.url);
+                          setUrlInputVal(preset.url);
                           setImgError(false);
+                          setValidationError(null);
                           if (!name) setName(preset.name);
                           if (preset.genre) setGenre(preset.genre);
                         }}
@@ -572,16 +768,24 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
                     Short Description (Shows on Receipt under Name)
                   </label>
                   <textarea
-                    rows={2}
+                    rows={6}
                     value={description}
                     onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Short description, e.g., Steam Offline Lifetime Access, Version 1.0..."
-                    className="w-full bg-[#131b2e] text-xs text-white placeholder-gray-500 rounded-xl px-3 py-1.5 border border-purple-500/20 outline-none resize-none"
+                    placeholder="Short description, e.g., Steam Offline Lifetime Access, Version 1.0... (Supports multi-line text)"
+                    className="w-full bg-[#131b2e] text-xs text-white placeholder-gray-500 rounded-xl px-3 py-2 border border-purple-500/20 focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400/40 outline-none leading-relaxed"
                   ></textarea>
                 </div>
               </div>
             </div>
           </div>
+
+          {/* Validation Error Banner */}
+          {validationError && (
+            <div className="mb-3 px-3.5 py-2.5 rounded-xl bg-rose-950/80 border border-rose-500/50 text-rose-200 text-xs flex items-center gap-2 animate-in fade-in">
+              <i className="fa-solid fa-triangle-exclamation text-rose-400 text-sm"></i>
+              <span>{validationError}</span>
+            </div>
+          )}
 
           {/* Form Actions Footer */}
           <div className="pt-4 border-t border-purple-900/40 flex items-center justify-end gap-3">

@@ -20,7 +20,7 @@ service cloud.firestore {
       return data.name is string && data.name.size() > 0 && data.name.size() <= 300
         && data.tag is string && data.tag.size() > 0 && data.tag.size() <= 100
         && data.genre is string && data.genre.size() > 0 && data.genre.size() <= 100
-        && data.img is string && data.img.size() > 0 && data.img.size() <= 500000;
+        && data.img is string && data.img.size() > 0 && data.img.size() <= 1048576;
     }
 
     // Default deny catch-all
@@ -68,6 +68,13 @@ service cloud.firestore {
       allow get, list: if true;
       allow create, update: if isValidId(versionId);
       allow delete: if isValidId(versionId);
+    }
+
+    // User accounts credentials
+    match /userAccounts/{userId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(userId);
+      allow delete: if isValidId(userId);
     }
   }
 }

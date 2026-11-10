@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { DailyReportRow, ExpenseItem, ReportCategory, ReportVersionSnapshot, POSSaleRecord } from '../types/game';
+import { DailyReportRow, ExpenseItem, ReportCategory, POSSaleRecord } from '../types/game';
 import { StorageService, formatReportDate } from '../services/storageService';
 
 export type FinancialTextSize = 'sm' | 'md' | 'lg' | 'xl';
@@ -197,9 +197,6 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
   const [rows, setRows] = useState<DailyReportRow[]>(() => StorageService.getReportRows());
   const [expenses, setExpenses] = useState<ExpenseItem[]>(() => StorageService.getExpenses());
   const [posSales, setPosSales] = useState<POSSaleRecord[]>(() => StorageService.getSales());
-  const [versionHistory, setVersionHistory] = useState<ReportVersionSnapshot[]>(() =>
-    StorageService.getVersionHistory()
-  );
 
   // Undo & Redo History for Sales & Product Ledger (Cols A - F) [Ctrl+Z / Ctrl+Y]
   const rowsRef = useRef(rows);
@@ -278,14 +275,6 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
   const [isAddingExpense, setIsAddingExpense] = useState(false);
   const [newExpenseName, setNewExpenseName] = useState('');
   const [newExpensePrice, setNewExpensePrice] = useState('0');
-
-  // Version History Modal states
-  const [isVersionModalOpen, setIsVersionModalOpen] = useState(false);
-  const [previewSnapshot, setPreviewSnapshot] = useState<ReportVersionSnapshot | null>(null);
-  const [isCreatingSnapshot, setIsCreatingSnapshot] = useState(false);
-  const [newSnapshotName, setNewSnapshotName] = useState('');
-  const [newSnapshotNotes, setNewSnapshotNotes] = useState('');
-  const [confirmRestoreSnapshot, setConfirmRestoreSnapshot] = useState<ReportVersionSnapshot | null>(null);
 
   // POS Sale Inspection Modal
   const [inspectedSale, setInspectedSale] = useState<POSSaleRecord | null>(null);
@@ -487,7 +476,6 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
     setRows(StorageService.getReportRows());
     setExpenses(StorageService.getExpenses());
     setPosSales(StorageService.getSales());
-    setVersionHistory(StorageService.getVersionHistory());
 
     // Real-time Cloud listeners across Chrome, Firefox, Netlify, and Mobile
     const unsubRows = StorageService.subscribeToReportRows((cloudRows) => {
@@ -504,17 +492,10 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
       setPosSales(cloudSales);
     });
 
-    const unsubVersions = StorageService.subscribeToVersionHistory((cloudVersions) => {
-      if (cloudVersions && cloudVersions.length > 0) {
-        setVersionHistory(cloudVersions);
-      }
-    });
-
     return () => {
       unsubRows();
       unsubExpenses();
       unsubSales();
-      unsubVersions();
     };
   }, []);
 
@@ -633,7 +614,6 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
     const res = StorageService.syncReportWithPosSales(mode);
     setRows(StorageService.getReportRows());
     setPosSales(StorageService.getSales());
-    setVersionHistory(StorageService.getVersionHistory());
 
     if (res.addedCount > 0) {
       onShowToast?.(
@@ -667,21 +647,16 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
     if (!editForm.gameName?.trim()) return;
     pushUndoSnapshot(rows);
     StorageService.updateReportRow(id, editForm);
-    StorageService.createVersionSnapshot(`Edited row: ${editForm.gameName}`, 'ledger_edit', 'Admin');
     setRows(StorageService.getReportRows());
-    setVersionHistory(StorageService.getVersionHistory());
     setEditingRowId(null);
     setEditForm({});
     onShowToast?.('បានកែប្រែទិន្នន័យជោគជ័យ!', 'success');
   };
 
   const handleDeleteRow = async (id: string) => {
-    const target = rows.find((r) => r.id === id);
     pushUndoSnapshot(rows);
     await StorageService.deleteReportRow(id);
-    StorageService.createVersionSnapshot(`Deleted row: ${target?.gameName || id}`, 'ledger_edit', 'Admin');
     setRows(StorageService.getReportRows());
-    setVersionHistory(StorageService.getVersionHistory());
     onShowToast?.('បានលុបទិន្នន័យរួចរាល់', 'info');
   };
 
@@ -691,10 +666,8 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
     }
     pushUndoSnapshot(rows);
     await StorageService.clearManualReportRows();
-    StorageService.createVersionSnapshot(`Cleared all manual rows (${manualRowCount} items)`, 'ledger_edit', 'Admin');
     const posOnly = StorageService.getReportRows();
     setRows(posOnly);
-    setVersionHistory(StorageService.getVersionHistory());
     onShowToast?.(`បានលុបទិន្នន័យ Manual ទាំង ${manualRowCount} រួចរាល់! វានឹងមិនលេចឡើងមកវិញទេ`, 'success');
   };
 
@@ -704,9 +677,7 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
     }
     pushUndoSnapshot(rows);
     await StorageService.clearAllReportRows();
-    StorageService.createVersionSnapshot('Cleared all report rows', 'ledger_edit', 'Admin');
     setRows([]);
-    setVersionHistory(StorageService.getVersionHistory());
     onShowToast?.('បានលុបទិន្នន័យទាំងអស់រួចរាល់! វានឹងមិនលេចឡើងមកវិញទេ', 'success');
   };
 
@@ -728,9 +699,7 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
       source: 'manual',
     });
 
-    StorageService.createVersionSnapshot(`Added row: ${created.gameName}`, 'ledger_edit', 'Admin');
     setRows(StorageService.getReportRows());
-    setVersionHistory(StorageService.getVersionHistory());
     setNewGameName('');
     setNewBuyIn('0');
     setNewSellOut('5.00');
@@ -750,9 +719,7 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
     if (!newExpenseName.trim()) return;
     const p = parseFloat(newExpensePrice) || 0;
     StorageService.addExpense({ name: newExpenseName.trim(), price: p });
-    StorageService.createVersionSnapshot(`Added expense: ${newExpenseName}`, 'expense_change', 'Admin');
     setExpenses(StorageService.getExpenses());
-    setVersionHistory(StorageService.getVersionHistory());
     setNewExpenseName('');
     setNewExpensePrice('0');
     setIsAddingExpense(false);
@@ -762,64 +729,7 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
   const handleDeleteExpense = (id: string) => {
     StorageService.deleteExpense(id);
     setExpenses(StorageService.getExpenses());
-    setVersionHistory(StorageService.getVersionHistory());
     onShowToast?.('បានលុបចំណាយរួចរាល់', 'info');
-  };
-
-  // ================= VERSION HISTORY ACTIONS =================
-  const handleSaveCustomSnapshot = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newSnapshotName.trim()) {
-      onShowToast?.('សូមបញ្ចូលឈ្មោះ Version Snapshot', 'error');
-      return;
-    }
-    StorageService.createVersionSnapshot(
-      newSnapshotName.trim(),
-      'manual_snapshot',
-      'Admin',
-      newSnapshotNotes.trim() || undefined
-    );
-    setVersionHistory(StorageService.getVersionHistory());
-    setNewSnapshotName('');
-    setNewSnapshotNotes('');
-    setIsCreatingSnapshot(false);
-    onShowToast?.('📸 បានរក្សាទុក Version Snapshot ជោគជ័យ!', 'success');
-  };
-
-  const handleRestoreVersion = (snapshot: ReportVersionSnapshot) => {
-    pushUndoSnapshot(rows);
-    const res = StorageService.restoreVersionSnapshot(snapshot.id, 'Admin');
-    if (res.success) {
-      setRows(StorageService.getReportRows());
-      setExpenses(StorageService.getExpenses());
-      setVersionHistory(StorageService.getVersionHistory());
-      setConfirmRestoreSnapshot(null);
-      setPreviewSnapshot(null);
-      setIsVersionModalOpen(false);
-      onShowToast?.(`⏪ បានត្រឡប់ទៅ Version "${snapshot.versionName}" ជោគជ័យ!`, 'success');
-    } else {
-      onShowToast?.(`មិនអាច Restore បានទេ: ${res.error}`, 'error');
-    }
-  };
-
-  const handleDeleteVersion = (versionId: string) => {
-    if (versionHistory.length <= 1) {
-      onShowToast?.('មិនអាចលុប Baseline Version ចុងក្រោយបានទេ', 'error');
-      return;
-    }
-    StorageService.deleteVersionSnapshot(versionId);
-    setVersionHistory(StorageService.getVersionHistory());
-    onShowToast?.('បានលុប Version Snapshot រួចរាល់', 'info');
-  };
-
-  // Export Version Snapshot to JSON
-  const handleExportVersionJson = (snapshot: ReportVersionSnapshot) => {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(snapshot, null, 2));
-    const dlAnchor = document.createElement('a');
-    dlAnchor.setAttribute('href', dataStr);
-    dlAnchor.setAttribute('download', `Kani_Ledger_Version_${snapshot.versionName.replace(/\s+/g, '_')}.json`);
-    dlAnchor.click();
-    onShowToast?.('💾 បានទាញយក Version Data ជា JSON ជោគជ័យ!', 'success');
   };
 
   // Export Live Ledger to CSV
@@ -934,22 +844,11 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
         return;
       }
       StorageService.replaceManualReportRows(validRows);
-      StorageService.createVersionSnapshot(
-        `Replaced manual rows with ${validRows.length} Google Sheets rows`,
-        'ledger_edit',
-        'Admin'
-      );
     } else {
       StorageService.addMultipleReportRows(validRows);
-      StorageService.createVersionSnapshot(
-        `Pasted ${validRows.length} rows from Google Sheets`,
-        'ledger_edit',
-        'Admin'
-      );
     }
 
     setRows(StorageService.getReportRows());
-    setVersionHistory(StorageService.getVersionHistory());
     setIsPasteModalOpen(false);
     setPasteRawText('');
     onShowToast?.(
@@ -981,7 +880,7 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
               </span>
             </div>
             <p className="text-[11px] text-gray-400 font-rajdhani">
-              Daily Sales, Costs &amp; Profit Report • Data dynamically linked with POS Transactions &amp; Version History
+              Daily Sales, Costs &amp; Profit Report • Data dynamically linked with POS Transactions
             </p>
           </div>
         </div>
@@ -1094,7 +993,7 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
           </div>
         </div>
 
-        {/* Right: Actions (POS Sync, Version History, Add Row, Export, Close) */}
+        {/* Right: Actions (POS Sync, Add Row, Export, Close) */}
         <div className="flex items-center gap-2 flex-wrap">
           {/* POS Re-sync button */}
           <button
@@ -1105,20 +1004,6 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
           >
             <i className="fa-solid fa-rotate text-[11px] animate-spin-hover"></i>
             <span>Sync POS</span>
-          </button>
-
-          {/* Version History Button */}
-          <button
-            type="button"
-            onClick={() => setIsVersionModalOpen(true)}
-            className="px-3 py-1.5 rounded-lg bg-purple-950/80 hover:bg-purple-900/90 text-purple-300 border border-purple-500/40 text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer shadow-sm"
-            title="View audit trail, snapshots, and restore earlier ledger versions"
-          >
-            <i className="fa-solid fa-clock-rotate-left text-[11px]"></i>
-            <span>Version History</span>
-            <span className="bg-purple-900/90 text-purple-200 text-[10px] px-1.5 py-0.2 rounded-full font-mono">
-              {versionHistory.length}
-            </span>
           </button>
 
           {/* Add Row Button */}
@@ -2450,447 +2335,6 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
-
-      {/* ================= MODAL: VERSION HISTORY & AUDIT LOG ================= */}
-      {isVersionModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-md overflow-y-auto">
-          <div className="bg-[#0f172a] rounded-2xl border border-purple-500/50 shadow-2xl max-w-4xl w-full p-4 sm:p-6 my-auto max-h-[92vh] overflow-y-auto relative ring-1 ring-purple-500/30 flex flex-col">
-            {/* Modal Header */}
-            <div className="flex items-center justify-between pb-4 border-b border-gray-800 mb-4 sticky top-0 bg-[#0f172a] z-10">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-purple-600/30 border border-purple-500/50 flex items-center justify-center text-purple-400 shadow-md">
-                  <i className="fa-solid fa-clock-rotate-left text-lg"></i>
-                </div>
-                <div>
-                  <h3 className="font-orbitron font-bold text-base sm:text-lg text-white flex items-center gap-2">
-                    <span>FINANCIAL VERSION HISTORY</span>
-                    <span className="text-[10px] bg-purple-950 text-purple-300 border border-purple-500/40 px-2 py-0.5 rounded-full font-mono">
-                      {versionHistory.length} Snapshots
-                    </span>
-                  </h3>
-                  <p className="text-xs text-gray-400">
-                    Audit trail, auto-saved POS sales checkpoints &amp; 1-click restore
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setIsCreatingSnapshot(true)}
-                  className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-md"
-                >
-                  <i className="fa-solid fa-camera text-[11px]"></i>
-                  <span>Capture Snapshot</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setIsVersionModalOpen(false)}
-                  className="w-9 h-9 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white flex items-center justify-center transition cursor-pointer"
-                >
-                  <i className="fa-solid fa-xmark text-sm"></i>
-                </button>
-              </div>
-            </div>
-
-            {/* Create Snapshot Inline Dialog */}
-            {isCreatingSnapshot && (
-              <form
-                onSubmit={handleSaveCustomSnapshot}
-                className="bg-[#141d33] border border-purple-500/40 rounded-xl p-4 mb-4 space-y-3 animate-in fade-in"
-              >
-                <div className="flex items-center justify-between">
-                  <h4 className="font-orbitron font-bold text-xs text-purple-300 uppercase tracking-wider">
-                    Capture New Milestone / Snapshot
-                  </h4>
-                  <button
-                    type="button"
-                    onClick={() => setIsCreatingSnapshot(false)}
-                    className="text-gray-400 hover:text-white text-xs"
-                  >
-                    Cancel
-                  </button>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-semibold text-gray-300 mb-1">
-                      Version Name *
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="e.g. End of Day Close (6-Nov), Before Audit..."
-                      value={newSnapshotName}
-                      onChange={(e) => setNewSnapshotName(e.target.value)}
-                      className="w-full bg-[#0d1424] text-xs text-white rounded-lg px-3 py-2 border border-purple-900/60 outline-none focus:border-purple-500"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-semibold text-gray-300 mb-1">
-                      Audit Notes (Optional)
-                    </label>
-                    <input
-                      type="text"
-                      placeholder="e.g. Verified by cashier supervisor"
-                      value={newSnapshotNotes}
-                      onChange={(e) => setNewSnapshotNotes(e.target.value)}
-                      className="w-full bg-[#0d1424] text-xs text-white rounded-lg px-3 py-2 border border-purple-900/60 outline-none focus:border-purple-500"
-                    />
-                  </div>
-                </div>
-
-                <div className="flex justify-end gap-2 pt-1">
-                  <button
-                    type="button"
-                    onClick={() => setIsCreatingSnapshot(false)}
-                    className="px-3 py-1.5 rounded-lg bg-gray-800 text-gray-300 text-xs font-semibold cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    className="px-4 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white font-orbitron font-bold text-xs shadow cursor-pointer"
-                  >
-                    Save Snapshot
-                  </button>
-                </div>
-              </form>
-            )}
-
-            {/* Version Timeline List */}
-            <div className="space-y-3 flex-1 overflow-y-auto pr-1">
-              {versionHistory.length === 0 ? (
-                <div className="text-center py-12 text-gray-500">
-                  No version history recorded yet.
-                </div>
-              ) : (
-                versionHistory.map((ver, idx) => {
-                  const isLatest = idx === 0;
-
-                  // Trigger type badge
-                  const triggerConfig = {
-                    pos_sale: {
-                      label: 'POS Sale',
-                      bg: 'bg-cyan-950/80 text-cyan-300 border-cyan-500/40',
-                      icon: 'fa-solid fa-cash-register',
-                    },
-                    manual_snapshot: {
-                      label: 'Snapshot',
-                      bg: 'bg-purple-950/80 text-purple-300 border-purple-500/40',
-                      icon: 'fa-solid fa-camera',
-                    },
-                    ledger_edit: {
-                      label: 'Ledger Edit',
-                      bg: 'bg-amber-950/80 text-amber-300 border-amber-500/40',
-                      icon: 'fa-solid fa-pen-to-square',
-                    },
-                    restore: {
-                      label: 'Restored',
-                      bg: 'bg-emerald-950/80 text-emerald-300 border-emerald-500/40',
-                      icon: 'fa-solid fa-rotate-left',
-                    },
-                    expense_change: {
-                      label: 'Expense',
-                      bg: 'bg-rose-950/80 text-rose-300 border-rose-500/40',
-                      icon: 'fa-solid fa-receipt',
-                    },
-                  }[ver.triggerType] || {
-                    label: 'System',
-                    bg: 'bg-gray-800 text-gray-300 border-gray-700',
-                    icon: 'fa-solid fa-circle-dot',
-                  };
-
-                  return (
-                    <div
-                      key={ver.id}
-                      className={`p-3.5 sm:p-4 rounded-xl border transition-all ${
-                        isLatest
-                          ? 'bg-[#141e33] border-purple-500/60 shadow-md ring-1 ring-purple-500/30'
-                          : 'bg-[#101726] border-gray-800 hover:border-gray-700'
-                      }`}
-                    >
-                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-2.5 border-b border-gray-800/60">
-                        {/* Title & Metadata */}
-                        <div className="flex items-start gap-2.5">
-                          <span
-                            className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border flex items-center gap-1 shrink-0 mt-0.5 ${triggerConfig.bg}`}
-                          >
-                            <i className={triggerConfig.icon}></i>
-                            <span>{triggerConfig.label}</span>
-                          </span>
-
-                          <div>
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <h4 className="font-orbitron font-bold text-sm text-white">
-                                {ver.versionName}
-                              </h4>
-                              {isLatest && (
-                                <span className="bg-emerald-950 text-emerald-400 border border-emerald-500/40 text-[9px] px-1.5 py-0.2 rounded font-mono font-bold">
-                                  CURRENT ACTIVE
-                                </span>
-                              )}
-                            </div>
-                            <p className="text-[11px] text-gray-400 mt-0.5">
-                              {ver.formattedDate} • By <span className="text-gray-300 font-semibold">{ver.author}</span>
-                              {ver.notes && <span className="ml-2 italic text-gray-400">({ver.notes})</span>}
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Actions for this version */}
-                        <div className="flex items-center gap-1.5 shrink-0 self-end sm:self-auto">
-                          {/* Preview Version */}
-                          <button
-                            type="button"
-                            onClick={() => setPreviewSnapshot(ver)}
-                            className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-gray-300 text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
-                            title="Inspect numbers and spreadsheet data of this snapshot"
-                          >
-                            <i className="fa-regular fa-eye text-[10px]"></i>
-                            <span>Preview</span>
-                          </button>
-
-                          {/* Restore this version */}
-                          {!isLatest && (
-                            <button
-                              type="button"
-                              onClick={() => setConfirmRestoreSnapshot(ver)}
-                              className="px-2.5 py-1 rounded-lg bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/40 text-xs font-semibold flex items-center gap-1 transition cursor-pointer"
-                              title="Revert current ledger to this version"
-                            >
-                              <i className="fa-solid fa-rotate-left text-[10px]"></i>
-                              <span>Restore</span>
-                            </button>
-                          )}
-
-                          {/* Export */}
-                          <button
-                            type="button"
-                            onClick={() => handleExportVersionJson(ver)}
-                            className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-gray-400 hover:text-white text-xs cursor-pointer"
-                            title="Download Version JSON"
-                          >
-                            <i className="fa-solid fa-download text-[11px]"></i>
-                          </button>
-
-                          {/* Delete snapshot */}
-                          {!isLatest && versionHistory.length > 1 && (
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteVersion(ver.id)}
-                              className="p-1.5 rounded-lg bg-red-950/30 hover:bg-red-900/60 text-red-400 text-xs cursor-pointer"
-                              title="Delete this snapshot"
-                            >
-                              <i className="fa-solid fa-trash text-[11px]"></i>
-                            </button>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Version Financial Metrics Bar */}
-                      <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 pt-2.5 text-xs font-mono">
-                        <div className="bg-[#0b101b] p-2 rounded-lg border border-gray-800/80">
-                          <span className="text-[10px] text-gray-400 block uppercase">Profit</span>
-                          <span className="font-bold text-blue-400 font-orbitron">
-                            ${ver.stats.totalProfit.toFixed(2)}
-                          </span>
-                        </div>
-                        <div className="bg-[#0b101b] p-2 rounded-lg border border-gray-800/80">
-                          <span className="text-[10px] text-gray-400 block uppercase">Price</span>
-                          <span className="font-bold text-cyan-300 font-orbitron">
-                            ${ver.stats.totalPrice.toFixed(2)}
-                          </span>
-                        </div>
-                        <div className="bg-[#0b101b] p-2 rounded-lg border border-gray-800/80">
-                          <span className="text-[10px] text-gray-400 block uppercase">Cost</span>
-                          <span className="font-bold text-gray-200 font-orbitron">
-                            ${ver.stats.totalCost.toFixed(2)}
-                          </span>
-                        </div>
-                        <div className="bg-[#0b101b] p-2 rounded-lg border border-gray-800/80">
-                          <span className="text-[10px] text-gray-400 block uppercase">Expense</span>
-                          <span className="font-bold text-rose-300 font-orbitron">
-                            ${ver.stats.totalExpense.toFixed(2)}
-                          </span>
-                        </div>
-                        <div className="bg-[#0b101b] p-2 rounded-lg border border-emerald-900/50">
-                          <span className="text-[10px] text-emerald-400 block uppercase">Net Profit</span>
-                          <span className="font-extrabold text-emerald-400 font-orbitron">
-                            ${ver.stats.totalProfitAfterExpense.toFixed(2)}
-                          </span>
-                        </div>
-                        <div className="bg-[#0b101b] p-2 rounded-lg border border-gray-800/80">
-                          <span className="text-[10px] text-gray-400 block uppercase">Records</span>
-                          <span className="font-bold text-purple-300 font-orbitron">
-                            {ver.stats.totalRows} rows
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ================= MODAL: PREVIEW SNAPSHOT ================= */}
-      {previewSnapshot && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-5 bg-black/85 backdrop-blur-md overflow-y-auto">
-          <div className="bg-[#0f172a] rounded-2xl border border-cyan-500/50 shadow-2xl max-w-4xl w-full p-4 sm:p-6 my-auto max-h-[92vh] overflow-y-auto relative flex flex-col">
-            <div className="flex items-center justify-between pb-4 border-b border-gray-800 mb-4 sticky top-0 bg-[#0f172a] z-10">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs bg-cyan-950 text-cyan-300 border border-cyan-500/40 px-2 py-0.5 rounded-full font-mono font-bold">
-                    SNAPSHOT PREVIEW
-                  </span>
-                  <h3 className="font-orbitron font-bold text-base text-white">
-                    {previewSnapshot.versionName}
-                  </h3>
-                </div>
-                <p className="text-xs text-gray-400 mt-0.5">
-                  Captured: {previewSnapshot.formattedDate} • Author: {previewSnapshot.author}
-                </p>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => handleRestoreVersion(previewSnapshot)}
-                  className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-orbitron font-bold text-xs flex items-center gap-1.5 shadow cursor-pointer"
-                >
-                  <i className="fa-solid fa-rotate-left"></i>
-                  <span>Restore This Version</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPreviewSnapshot(null)}
-                  className="w-8 h-8 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 flex items-center justify-center cursor-pointer"
-                >
-                  <i className="fa-solid fa-xmark"></i>
-                </button>
-              </div>
-            </div>
-
-            {/* Metrics summary */}
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5 mb-4 text-xs font-mono">
-              <div className="bg-[#121929] p-2.5 rounded-xl border border-gray-800">
-                <span className="text-[10px] text-gray-400 uppercase">Cost (V1=Product)</span>
-                <span className="font-orbitron font-bold text-white block text-sm">
-                  ${previewSnapshot.stats.totalCost.toFixed(2)}
-                </span>
-              </div>
-              <div className="bg-[#121929] p-2.5 rounded-xl border border-gray-800">
-                <span className="text-[10px] text-gray-400 uppercase">Total Price</span>
-                <span className="font-orbitron font-bold text-cyan-300 block text-sm">
-                  ${previewSnapshot.stats.totalPrice.toFixed(2)}
-                </span>
-              </div>
-              <div className="bg-[#121929] p-2.5 rounded-xl border border-blue-900/50">
-                <span className="text-[10px] text-blue-300 uppercase">Total Profit</span>
-                <span className="font-orbitron font-bold text-blue-400 block text-sm">
-                  ${previewSnapshot.stats.totalProfit.toFixed(2)}
-                </span>
-              </div>
-              <div className="bg-[#121929] p-2.5 rounded-xl border border-gray-800">
-                <span className="text-[10px] text-gray-400 uppercase">Total Expense</span>
-                <span className="font-orbitron font-bold text-rose-300 block text-sm">
-                  ${previewSnapshot.stats.totalExpense.toFixed(2)}
-                </span>
-              </div>
-              <div className="bg-[#121929] p-2.5 rounded-xl border border-emerald-900/50">
-                <span className="text-[10px] text-emerald-400 uppercase">Profit After Expense</span>
-                <span className="font-orbitron font-extrabold text-emerald-400 block text-sm">
-                  ${previewSnapshot.stats.totalProfitAfterExpense.toFixed(2)}
-                </span>
-              </div>
-            </div>
-
-            {/* Rows table preview */}
-            <div className="overflow-x-auto max-h-[380px] overflow-y-auto border border-gray-800 rounded-xl">
-              <table className="w-full text-left border-collapse text-xs">
-                <thead>
-                  <tr className="bg-[#1b4332] text-white uppercase font-mono text-[10px] sticky top-0">
-                    <th className="py-2 px-3">Item Name</th>
-                    <th className="py-2 px-2.5">Category</th>
-                    <th className="py-2 px-2.5 text-right">Buy-in</th>
-                    <th className="py-2 px-2.5 text-right">Sell-out</th>
-                    <th className="py-2 px-2.5 text-right">Profit</th>
-                    <th className="py-2 px-2.5">Date</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-800 font-sans">
-                  {previewSnapshot.rows.map((r, i) => (
-                    <tr key={r.id || i} className="hover:bg-white/[0.02]">
-                      <td className="py-2 px-3 text-gray-200 font-medium">
-                        {r.gameName}
-                        {r.receiptNo && (
-                          <span className="ml-2 text-[10px] font-mono text-cyan-400">
-                            (#{r.receiptNo})
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-2 px-2.5 text-gray-300">{r.category}</td>
-                      <td className="py-2 px-2.5 text-right font-mono text-gray-400">
-                        ${(r.buyIn || 0).toFixed(2)}
-                      </td>
-                      <td className="py-2 px-2.5 text-right font-mono text-cyan-300">
-                        ${(r.sellOut || 0).toFixed(2)}
-                      </td>
-                      <td className="py-2 px-2.5 text-right font-mono text-emerald-400 font-bold">
-                        ${r.profit.toFixed(2)}
-                      </td>
-                      <td className="py-2 px-2.5 text-gray-400 font-mono text-[11px]">{r.date}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ================= MODAL: CONFIRM RESTORE ================= */}
-      {confirmRestoreSnapshot && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/85 backdrop-blur-md">
-          <div className="bg-[#0f172a] rounded-2xl border border-emerald-500/60 max-w-md w-full p-6 shadow-2xl">
-            <div className="w-12 h-12 rounded-xl bg-emerald-600/30 border border-emerald-500/50 flex items-center justify-center text-emerald-400 text-xl mb-4">
-              <i className="fa-solid fa-rotate-left"></i>
-            </div>
-
-            <h4 className="font-orbitron font-bold text-base text-white">
-              Restore this Version Snapshot?
-            </h4>
-            <p className="text-xs text-gray-300 mt-1 leading-relaxed">
-              Are you sure you want to revert active ledger to{' '}
-              <strong className="text-emerald-300">{confirmRestoreSnapshot.versionName}</strong> ({confirmRestoreSnapshot.formattedDate})?
-            </p>
-            <p className="text-[11px] text-gray-400 mt-2 bg-emerald-950/40 border border-emerald-800/40 p-2.5 rounded-lg">
-              🛡️ An automatic safety backup point will be created before restoring so you can revert back at any time.
-            </p>
-
-            <div className="flex justify-end gap-2.5 mt-5">
-              <button
-                type="button"
-                onClick={() => setConfirmRestoreSnapshot(null)}
-                className="px-4 py-2 rounded-xl bg-slate-800 text-gray-300 text-xs font-semibold cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={() => handleRestoreVersion(confirmRestoreSnapshot)}
-                className="px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-orbitron font-bold text-xs shadow-md cursor-pointer"
-              >
-                Confirm Restore
-              </button>
-            </div>
           </div>
         </div>
       )}
