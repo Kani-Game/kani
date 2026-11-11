@@ -6,6 +6,8 @@ interface GameModalProps {
   isSelected: boolean;
   onToggleSelect: (game: Game) => void;
   onClose: () => void;
+  adminHandle?: string;
+  onSendToTelegram?: (game: Game) => void;
 }
 
 export const GameModal: React.FC<GameModalProps> = ({
@@ -13,6 +15,8 @@ export const GameModal: React.FC<GameModalProps> = ({
   isSelected,
   onToggleSelect,
   onClose,
+  adminHandle,
+  onSendToTelegram,
 }) => {
   const [imgError, setImgError] = useState(false);
   if (!game) return null;
@@ -90,29 +94,42 @@ export const GameModal: React.FC<GameModalProps> = ({
           </h3>
 
           {/* Action Buttons */}
-          <div className="flex flex-col sm:flex-row gap-3">
-            <button
-              onClick={() => {
-                onToggleSelect(game);
-              }}
-              className={`flex-1 py-3 px-6 rounded-xl font-orbitron font-bold text-sm text-center text-white transition shadow-lg flex items-center justify-center gap-2 ${
-                isSelected
-                  ? 'bg-red-600 hover:bg-red-500 shadow-red-900/50'
-                  : 'bg-purple-600 hover:bg-purple-500 shadow-purple-900/50'
-              }`}
-            >
-              <i
-                className={`fa-solid ${isSelected ? 'fa-xmark' : 'fa-check'}`}
-              ></i>
-              <span>{isSelected ? 'លុបចេញពីបញ្ជី' : 'ជ្រើសរើស Game នេះ'}</span>
-            </button>
+          <div className="flex flex-col gap-3">
+            {onSendToTelegram && (
+              <button
+                type="button"
+                onClick={() => onSendToTelegram(game)}
+                className="w-full py-3.5 px-6 rounded-xl font-orbitron font-bold text-sm text-center text-white bg-gradient-to-r from-blue-500 via-sky-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 transition-all shadow-lg shadow-cyan-900/50 flex items-center justify-center gap-2 cursor-pointer border border-cyan-400/40"
+              >
+                <i className="fa-brands fa-telegram text-xl"></i>
+                <span>ផ្ញើ Game នេះទៅ Admin (@{(adminHandle || 'kanigame168').replace('@', '')})</span>
+              </button>
+            )}
 
-            <button
-              onClick={onClose}
-              className="py-3 px-6 rounded-xl font-rajdhani font-bold text-sm bg-slate-800 hover:bg-slate-700 text-gray-200 border border-slate-700 transition"
-            >
-              បិទ (Close)
-            </button>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                onClick={() => {
+                  onToggleSelect(game);
+                }}
+                className={`flex-1 py-3 px-6 rounded-xl font-orbitron font-bold text-sm text-center text-white transition shadow-lg flex items-center justify-center gap-2 cursor-pointer ${
+                  isSelected
+                    ? 'bg-red-600 hover:bg-red-500 shadow-red-900/50'
+                    : 'bg-purple-600 hover:bg-purple-500 shadow-purple-900/50'
+                }`}
+              >
+                <i
+                  className={`fa-solid ${isSelected ? 'fa-xmark' : 'fa-check'}`}
+                ></i>
+                <span>{isSelected ? 'លុបចេញពីបញ្ជី' : 'ជ្រើសរើស Game នេះ'}</span>
+              </button>
+
+              <button
+                onClick={onClose}
+                className="py-3 px-6 rounded-xl font-rajdhani font-bold text-sm bg-slate-800 hover:bg-slate-700 text-gray-200 border border-slate-700 transition cursor-pointer"
+              >
+                បិទ (Close)
+              </button>
+            </div>
           </div>
         </div>
       </div>

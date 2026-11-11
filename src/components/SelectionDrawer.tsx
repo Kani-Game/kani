@@ -8,7 +8,7 @@ interface SelectionDrawerProps {
   onRemoveGame: (id: string) => void;
   onClearAll: () => void;
   adminHandle: string;
-  onShowToast: (msg: string) => void;
+  onShowToast: (msg: string, type?: 'success' | 'error' | 'info') => void;
 }
 
 export const SelectionDrawer: React.FC<SelectionDrawerProps> = ({
@@ -46,26 +46,32 @@ export const SelectionDrawer: React.FC<SelectionDrawerProps> = ({
     return text;
   };
 
-  const handleSendTelegram = () => {
+  const handleSendTelegram = async () => {
     if (selectedGames.length === 0) {
       onShowToast('សូមជ្រើសរើស Game យ៉ាងហោចណាស់ 1 ដំបូង!');
       return;
     }
 
     const message = generateTelegramMessage();
-    const encodedText = encodeURIComponent(message);
-    const cleanHandle = (customHandle || adminHandle).replace('@', '').trim();
+    const cleanHandle = (customHandle || adminHandle || 'kanigame168').replace('@', '').trim();
 
-    // Primary: Direct share link
-    const telegramShareUrl = `https://t.me/share/url?text=${encodedText}`;
-    
-    // Also copy to clipboard so user has it immediately
+    // Copy formatted text to clipboard so customer can paste in chat
     try {
-      navigator.clipboard.writeText(message);
+      await navigator.clipboard.writeText(message);
     } catch {}
 
+    // Open direct chat with Admin @kanigame168
+    const directUrl = `https://t.me/${cleanHandle}`;
+    window.open(directUrl, '_blank');
+    onShowToast(`📋 បានចម្លងបញ្ជី Game! កំពុងបើកឆាតជាមួយ Admin @${cleanHandle}... (សូមចុច Paste)`, 'success');
+  };
+
+  const handleShareToOtherChats = () => {
+    if (selectedGames.length === 0) return;
+    const message = generateTelegramMessage();
+    const encodedText = encodeURIComponent(message);
+    const telegramShareUrl = `https://t.me/share/url?text=${encodedText}`;
     window.open(telegramShareUrl, '_blank');
-    onShowToast(`កំពុងបញ្ជូនទៅកាន់ Telegram (${cleanHandle})...`);
   };
 
   const handleCopyOrderSummary = () => {
@@ -194,7 +200,7 @@ export const SelectionDrawer: React.FC<SelectionDrawerProps> = ({
               }`}
             >
               <i className="fa-brands fa-telegram text-lg"></i>
-              <span>ផ្ញើទៅ Telegram ឥឡូវនេះ ({selectedGames.length})</span>
+              <span>ផ្ញើទៅ Admin @{(customHandle || adminHandle || 'kanigame168').replace('@', '')} ({selectedGames.length})</span>
             </button>
 
             <div className="flex items-center gap-2">
@@ -203,9 +209,21 @@ export const SelectionDrawer: React.FC<SelectionDrawerProps> = ({
                 onClick={handleCopyOrderSummary}
                 disabled={selectedGames.length === 0}
                 className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-gray-300 rounded-xl text-xs font-semibold border border-slate-700 transition flex items-center justify-center gap-1.5"
+                title="Copy order text"
               >
                 <i className="fa-solid fa-clipboard text-purple-400"></i>
-                <span>ចម្លងសារ (Copy Text)</span>
+                <span>Copy Text</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleShareToOtherChats}
+                disabled={selectedGames.length === 0}
+                className="flex-1 py-2 px-3 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-cyan-300 rounded-xl text-xs font-semibold border border-slate-700 transition flex items-center justify-center gap-1.5"
+                title="Share to other Telegram chats or groups"
+              >
+                <i className="fa-solid fa-share-nodes text-xs"></i>
+                <span>Share Chat ផ្សេង</span>
               </button>
 
               {selectedGames.length > 0 && (
@@ -213,9 +231,9 @@ export const SelectionDrawer: React.FC<SelectionDrawerProps> = ({
                   type="button"
                   onClick={onClearAll}
                   className="py-2 px-3 bg-red-950/40 hover:bg-red-900/60 text-red-300 rounded-xl text-xs font-semibold border border-red-800/40 transition flex items-center gap-1"
+                  title="Clear selection"
                 >
                   <i className="fa-solid fa-trash-can"></i>
-                  <span>លុបទាំងអស់</span>
                 </button>
               )}
             </div>

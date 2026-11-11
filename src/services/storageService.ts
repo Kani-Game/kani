@@ -76,7 +76,7 @@ export const DEFAULT_SETTINGS: SiteSettings = {
   heroBadge: 'ជ្រើសរើស Game និងផ្ញើទៅកាន់ Telegram ដោយផ្ទាល់',
   heroTitle: 'SELECT MULTIPLE GAMES & REQUEST VIA TELEGRAM',
   heroDescription: 'សូមចុចប៊ូតុង "ជ្រើសរើស" ឬ Tick លើ Game ដែលអ្នកចង់បាន រួចចុចផ្ញើទៅកាន់ Admin តាមរយៈ Telegram ភ្លាមៗ!',
-  telegramAdminHandle: '@KaniGame168',
+  telegramAdminHandle: '@kanigame168',
   telegramNotePlaceholder: 'ឧទាហរណ៍: Sokha - 012 345 678',
   khrExchangeRate: 4100,
   posCashierName: 'Kani Cashier',
@@ -462,7 +462,11 @@ export const StorageService = {
     try {
       const data = localStorage.getItem(STORAGE_KEY_SETTINGS);
       if (data) {
-        return { ...DEFAULT_SETTINGS, ...JSON.parse(data) };
+        const parsed = { ...DEFAULT_SETTINGS, ...JSON.parse(data) };
+        if (parsed.telegramAdminHandle === '@kanigam168' || !parsed.telegramAdminHandle) {
+          parsed.telegramAdminHandle = '@kanigame168';
+        }
+        return parsed;
       }
     } catch (e) {
       console.error('Failed to load settings', e);
@@ -479,6 +483,9 @@ export const StorageService = {
         if (docSnap.exists()) {
           const cloudData = docSnap.data();
           const merged: SiteSettings = { ...DEFAULT_SETTINGS, ...cloudData };
+          if (merged.telegramAdminHandle === '@kanigam168' || !merged.telegramAdminHandle) {
+            merged.telegramAdminHandle = '@kanigame168';
+          }
           try {
             localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(merged));
             idbSet(STORAGE_KEY_SETTINGS, merged).catch(() => {});

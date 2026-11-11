@@ -457,25 +457,52 @@ export default function App() {
     });
   };
 
-  // Direct Telegram Dispatch
-  const handleSendDirectToTelegram = () => {
+  // Direct Telegram Dispatch to Admin (@kanigame168)
+  const handleSendDirectToTelegram = async () => {
     const selectedList = Object.values(selectedGamesMap);
     if (selectedList.length === 0) {
       showToast('សូមជ្រើសរើស Game យ៉ាងហោចណាស់ 1 ដំបូង!', 'error');
       return;
     }
 
+    const cleanHandle = (settings.telegramAdminHandle || 'kanigame168').replace('@', '').trim();
+
     let text = `🎮 *KANI GAME - REQUEST GAMES*\n\n`;
-    text += `ជម្រាបសួរ Admin, ខ្ញុំចង់បាន Game ចំនួន (${selectedList.length}) ដូចខាងក្រោម៖\n\n`;
+    text += `ជម្រាបសួរ Admin @${cleanHandle}, ខ្ញុំចង់បាន Game ចំនួន (${selectedList.length}) ដូចខាងក្រោម៖\n\n`;
     selectedList.forEach((game, index) => {
       text += `${index + 1}. 🌟 ${game.name} (${game.tag})\n`;
     });
     text += `\nសូមអរគុណ! 🙏`;
 
-    const encodedText = encodeURIComponent(text);
-    const telegramUrl = `https://t.me/share/url?text=${encodedText}`;
-    window.open(telegramUrl, '_blank');
-    showToast('កំពុងបញ្ជូនទៅកាន់ Telegram...');
+    // 1. Copy formatted text to clipboard
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {}
+
+    // 2. Open chat directly with Admin @kanigame168
+    const directTelegramUrl = `https://t.me/${cleanHandle}`;
+    window.open(directTelegramUrl, '_blank');
+    showToast(`📋 បានចម្លងបញ្ជី Game! កំពុងបើក Telegram ទៅកាន់ @${cleanHandle} (សូមចុច Paste ក្នុងឆាត)...`, 'success');
+  };
+
+  // Direct Send Single Game to Telegram Admin (@kanigame168)
+  const handleSendSingleGameToTelegram = async (game: Game) => {
+    const cleanHandle = (settings.telegramAdminHandle || 'kanigame168').replace('@', '').trim();
+
+    let text = `🎮 *KANI GAME - REQUEST GAME*\n\n`;
+    text += `🌟 *Game*: ${game.name}\n`;
+    text += `🏷️ *Tag*: ${game.tag}\n`;
+    if (game.genre) text += `📁 *Genre*: ${game.genre}\n`;
+    if (game.price) text += `💰 *Price*: $${game.price.toFixed(2)}\n`;
+    text += `\nជម្រាបសួរ Admin @${cleanHandle}, ខ្ញុំចង់កុម្ម៉ង់ Game នេះ! សូមអរគុណ! 🙏`;
+
+    try {
+      await navigator.clipboard.writeText(text);
+    } catch {}
+
+    const directTelegramUrl = `https://t.me/${cleanHandle}`;
+    window.open(directTelegramUrl, '_blank');
+    showToast(`📋 បានចម្លង "${game.name}"! កំពុងបើក Telegram ទៅកាន់ @${cleanHandle} (សូមចុច Paste ក្នុងឆាត)...`, 'success');
   };
 
   // Admin & POS Authentication Actions
@@ -839,6 +866,7 @@ export default function App() {
                   isSelected={!!selectedGamesMap[game.id]}
                   onToggleSelect={toggleSelectGame}
                   onOpenPreview={setPreviewGame}
+                  onSendToTelegram={handleSendSingleGameToTelegram}
                 />
               ))}
             </div>
@@ -932,6 +960,8 @@ export default function App() {
         isSelected={previewGame ? !!selectedGamesMap[previewGame.id] : false}
         onToggleSelect={(g) => toggleSelectGame(g)}
         onClose={() => setPreviewGame(null)}
+        adminHandle={settings.telegramAdminHandle}
+        onSendToTelegram={handleSendSingleGameToTelegram}
       />
 
       {/* Admin & POS Login Modal */}

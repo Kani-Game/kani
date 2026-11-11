@@ -96,7 +96,7 @@ export const POSReceiptModal: React.FC<POSReceiptModalProps> = ({
                 {settings.portalSubtitle || 'Ultimate Gaming Portal & Store'}
               </p>
               <p className="text-[10px] text-gray-500 mt-0.5">
-                Telegram: {settings.telegramAdminHandle || '@KaniGame168'}
+                Telegram: {settings.telegramAdminHandle || '@kanigame168'}
               </p>
               <div className="mt-2 inline-block px-2.5 py-0.5 bg-black text-white text-[9px] font-bold rounded-full">
                 OFFICIAL RECEIPT

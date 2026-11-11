@@ -6,6 +6,7 @@ interface GameCardProps {
   isSelected: boolean;
   onToggleSelect: (game: Game) => void;
   onOpenPreview: (game: Game) => void;
+  onSendToTelegram?: (game: Game) => void;
 }
 
 export const GameCard: React.FC<GameCardProps> = ({
@@ -13,6 +14,7 @@ export const GameCard: React.FC<GameCardProps> = ({
   isSelected,
   onToggleSelect,
   onOpenPreview,
+  onSendToTelegram,
 }) => {
   const [imgError, setImgError] = useState(false);
   const isSteam = game.tag.toLowerCase().includes('steam');
@@ -110,6 +112,20 @@ export const GameCard: React.FC<GameCardProps> = ({
           >
             <i className="fa-solid fa-eye text-xs"></i>
           </button>
+
+          {onSendToTelegram && (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                onSendToTelegram(game);
+              }}
+              className="py-1.5 px-2.5 bg-gradient-to-r from-blue-600 to-cyan-600 hover:from-blue-500 hover:to-cyan-500 text-white rounded-lg text-xs transition shadow-sm cursor-pointer"
+              title="ផ្ញើ Game នេះទៅ Telegram Admin @kanigame168 ភ្លាមៗ"
+            >
+              <i className="fa-brands fa-telegram text-xs"></i>
+            </button>
+          )}
         </div>
       </div>
     </div>

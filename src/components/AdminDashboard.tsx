@@ -1380,7 +1380,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     onChange={(e) =>
                       setLocalSettings({ ...localSettings, telegramAdminHandle: e.target.value })
                     }
-                    placeholder="@KaniGame168"
+                    placeholder="@kanigame168"
                     className="w-full bg-[#131b2e] text-xs font-mono text-cyan-300 rounded-xl px-4 py-2.5 border border-purple-900/50 outline-none focus:border-purple-500"
                   />
                   <p className="text-[11px] text-gray-400 mt-1">
