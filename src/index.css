@@ -53,6 +53,10 @@
 }
 
 @media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
   body * {
     visibility: hidden;
   }
@@ -61,17 +65,18 @@
     visibility: visible;
   }
   #pos-printable-receipt {
-    position: absolute;
+    position: fixed;
     left: 0;
     top: 0;
     width: 100%;
     max-width: 80mm;
-    margin: 0 auto;
-    padding: 10px;
+    margin: 0;
+    padding: 8px;
     box-shadow: none !important;
     border: none !important;
     background: white !important;
     color: black !important;
+    z-index: 999999;
   }
 }
 

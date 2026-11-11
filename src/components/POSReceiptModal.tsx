@@ -32,9 +32,7 @@ export const POSReceiptModal: React.FC<POSReceiptModalProps> = ({
         text += `\n`;
       }
     });
-    text += `\n*TOTAL USD: $${sale.totalUsd.toFixed(2)}*\n`;
-    text += `\n⚠️ Account ដែលទិញហើយមិនអាចដូរលុយ ឬ ដូរgameវិញបានទេ\n`;
-    text += `Thank you for choosing Kani Game! 🎮`;
+    text += `\n*TOTAL USD: $${sale.totalUsd.toFixed(2)}*`;
     return text;
   };
 

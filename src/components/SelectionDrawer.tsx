@@ -57,7 +57,7 @@ export const SelectionDrawer: React.FC<SelectionDrawerProps> = ({
     const cleanHandle = (customHandle || adminHandle).replace('@', '').trim();
 
     // Primary: Direct share link
-    const telegramShareUrl = `https://t.me/share/url?url=https://kanigame.com&text=${encodedText}`;
+    const telegramShareUrl = `https://t.me/share/url?text=${encodedText}`;
     
     // Also copy to clipboard so user has it immediately
     try {

@@ -473,7 +473,7 @@ export default function App() {
     text += `\nសូមអរគុណ! 🙏`;
 
     const encodedText = encodeURIComponent(text);
-    const telegramUrl = `https://t.me/share/url?url=https://kanigame.com&text=${encodedText}`;
+    const telegramUrl = `https://t.me/share/url?text=${encodedText}`;
     window.open(telegramUrl, '_blank');
     showToast('កំពុងបញ្ជូនទៅកាន់ Telegram...');
   };
