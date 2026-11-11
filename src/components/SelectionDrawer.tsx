@@ -60,10 +60,11 @@ export const SelectionDrawer: React.FC<SelectionDrawerProps> = ({
       await navigator.clipboard.writeText(message);
     } catch {}
 
-    // Open direct chat with Admin @kanigame168
-    const directUrl = `https://t.me/${cleanHandle}`;
+    // Open direct chat with Admin @kanigame168 with pre-filled text
+    const encodedText = encodeURIComponent(message);
+    const directUrl = `https://t.me/${cleanHandle}?text=${encodedText}`;
     window.open(directUrl, '_blank');
-    onShowToast(`📋 បានចម្លងបញ្ជី Game! កំពុងបើកឆាតជាមួយ Admin @${cleanHandle}... (សូមចុច Paste)`, 'success');
+    onShowToast(`🚀 បានបញ្ជូនបញ្ជី Game ទៅកាន់ Telegram @${cleanHandle}! (ព័ត៌មានត្រូវបានបំពេញរួចរាល់)`, 'success');
   };
 
   const handleShareToOtherChats = () => {

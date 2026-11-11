@@ -474,35 +474,37 @@ export default function App() {
     });
     text += `\nសូមអរគុណ! 🙏`;
 
-    // 1. Copy formatted text to clipboard
+    // 1. Copy formatted text to clipboard as guaranteed backup
     try {
       await navigator.clipboard.writeText(text);
     } catch {}
 
-    // 2. Open chat directly with Admin @kanigame168
-    const directTelegramUrl = `https://t.me/${cleanHandle}`;
+    // 2. Open chat directly with Admin @kanigame168 WITH pre-filled message text
+    const encodedText = encodeURIComponent(text);
+    const directTelegramUrl = `https://t.me/${cleanHandle}?text=${encodedText}`;
     window.open(directTelegramUrl, '_blank');
-    showToast(`📋 បានចម្លងបញ្ជី Game! កំពុងបើក Telegram ទៅកាន់ @${cleanHandle} (សូមចុច Paste ក្នុងឆាត)...`, 'success');
+    showToast(`🚀 បានបញ្ជូនទៅកាន់ Telegram @${cleanHandle}! (ព័ត៌មាន Game ត្រូវបានបំពេញក្នុងឆាតរួចរាល់)`, 'success');
   };
 
   // Direct Send Single Game to Telegram Admin (@kanigame168)
   const handleSendSingleGameToTelegram = async (game: Game) => {
     const cleanHandle = (settings.telegramAdminHandle || 'kanigame168').replace('@', '').trim();
 
-    let text = `🎮 *KANI GAME - REQUEST GAME*\n\n`;
-    text += `🌟 *Game*: ${game.name}\n`;
-    text += `🏷️ *Tag*: ${game.tag}\n`;
-    if (game.genre) text += `📁 *Genre*: ${game.genre}\n`;
-    if (game.price) text += `💰 *Price*: $${game.price.toFixed(2)}\n`;
+    let text = `🎮 KANI GAME - REQUEST GAME\n\n`;
+    text += `🌟 Game: ${game.name}\n`;
+    text += `🏷️ Tag: ${game.tag}\n`;
+    if (game.genre) text += `📁 Genre: ${game.genre}\n`;
+    if (game.price) text += `💰 Price: $${game.price.toFixed(2)}\n`;
     text += `\nជម្រាបសួរ Admin @${cleanHandle}, ខ្ញុំចង់កុម្ម៉ង់ Game នេះ! សូមអរគុណ! 🙏`;
 
     try {
       await navigator.clipboard.writeText(text);
     } catch {}
 
-    const directTelegramUrl = `https://t.me/${cleanHandle}`;
+    const encodedText = encodeURIComponent(text);
+    const directTelegramUrl = `https://t.me/${cleanHandle}?text=${encodedText}`;
     window.open(directTelegramUrl, '_blank');
-    showToast(`📋 បានចម្លង "${game.name}"! កំពុងបើក Telegram ទៅកាន់ @${cleanHandle} (សូមចុច Paste ក្នុងឆាត)...`, 'success');
+    showToast(`🚀 បានបញ្ជូន "${game.name}" ទៅកាន់ Telegram @${cleanHandle}! (ព័ត៌មានត្រូវបានបំពេញរួចរាល់)`, 'success');
   };
 
   // Admin & POS Authentication Actions
