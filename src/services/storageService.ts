@@ -197,6 +197,7 @@ async function idbSet(key: string, value: any): Promise<void> {
 
 // In-memory cache for ultra-fast access and memory persistence
 let cachedGames: Game[] | null = null;
+let cachedUserAccounts: UserAccountsConfig | null = null;
 
 export const StorageService = {
   // Automatically merges latest games added to code (Google AI Studio / GitHub) with locally uploaded items on Netlify
@@ -525,11 +526,15 @@ export const StorageService = {
 
   // User Accounts & Authentication (Admin & POS Roles)
   getUserAccounts(): UserAccountsConfig {
+    if (cachedUserAccounts) {
+      return cachedUserAccounts;
+    }
     try {
       const data = localStorage.getItem(STORAGE_KEY_USER_ACCOUNTS);
       if (data) {
         const parsed = JSON.parse(data);
         if (parsed && parsed.admin && parsed.pos) {
+          cachedUserAccounts = parsed;
           return parsed;
         }
       }
@@ -538,7 +543,7 @@ export const StorageService = {
       if (legacy) {
         const legacyParsed = JSON.parse(legacy);
         if (legacyParsed?.username && legacyParsed?.passwordHash) {
-          return {
+          const legacyAccounts: UserAccountsConfig = {
             admin: {
               ...DEFAULT_USER_ACCOUNTS.admin,
               username: legacyParsed.username,
@@ -546,17 +551,22 @@ export const StorageService = {
             },
             pos: { ...DEFAULT_USER_ACCOUNTS.pos },
           };
+          cachedUserAccounts = legacyAccounts;
+          return legacyAccounts;
         }
       }
     } catch (e) {
       console.error('Error reading user accounts', e);
     }
+    cachedUserAccounts = DEFAULT_USER_ACCOUNTS;
     return DEFAULT_USER_ACCOUNTS;
   },
 
   saveUserAccounts(accounts: UserAccountsConfig): void {
+    cachedUserAccounts = { ...accounts };
     try {
       localStorage.setItem(STORAGE_KEY_USER_ACCOUNTS, JSON.stringify(accounts));
+      idbSet(STORAGE_KEY_USER_ACCOUNTS, accounts).catch(() => {});
       // Keep legacy credentials updated as well
       localStorage.setItem(
         STORAGE_KEY_CREDENTIALS,
@@ -577,8 +587,9 @@ export const StorageService = {
 
   subscribeToUserAccounts(callback: (accounts: UserAccountsConfig) => void): () => void {
     try {
+      const docRef = doc(db, 'settings', 'userAccounts');
       const unsub = onSnapshot(
-        doc(db, 'settings', 'userAccounts'),
+        docRef,
         (snapshot) => {
           if (snapshot.exists()) {
             const data = snapshot.data() as any;
@@ -587,9 +598,15 @@ export const StorageService = {
                 admin: { ...DEFAULT_USER_ACCOUNTS.admin, ...data.admin },
                 pos: { ...DEFAULT_USER_ACCOUNTS.pos, ...data.pos },
               };
+              cachedUserAccounts = merged;
               localStorage.setItem(STORAGE_KEY_USER_ACCOUNTS, JSON.stringify(merged));
+              idbSet(STORAGE_KEY_USER_ACCOUNTS, merged).catch(() => {});
               callback(merged);
             }
+          } else {
+            // Seed cloud if doc does not exist yet
+            const current = this.getUserAccounts();
+            setDoc(docRef, cleanFirestoreDoc(current)).catch(() => {});
           }
         },
         (error) => {
@@ -642,12 +659,12 @@ export const StorageService = {
     return this.updateUserAccount('admin', username, passwordHash);
   },
 
-  // Authenticate against Admin or POS user
-  login(
+  // Helper: Verify credentials against a specific accounts object
+  checkCredentials(
     username: string,
-    pass: string
+    pass: string,
+    accounts: UserAccountsConfig
   ): { success: boolean; role?: UserRole; username?: string; displayName?: string; error?: string } {
-    const accounts = this.getUserAccounts();
     const inputUser = username.trim().toLowerCase();
     const inputPass = pass.trim();
 
@@ -697,6 +714,50 @@ export const StorageService = {
       success: false,
       error: 'Username ឬ Password មិនត្រឹមត្រូវទេ! (Incorrect username or password)',
     };
+  },
+
+  // Authenticate against Admin or POS user (checks local memory/storage first, falls back to direct Firestore fetch)
+  async login(
+    username: string,
+    pass: string
+  ): Promise<{ success: boolean; role?: UserRole; username?: string; displayName?: string; error?: string }> {
+    // 1. Fast local verification
+    const localAccounts = this.getUserAccounts();
+    const localResult = this.checkCredentials(username, pass, localAccounts);
+    if (localResult.success) {
+      return localResult;
+    }
+
+    // 2. If local failed (e.g. password was changed on another device/tab), check Firestore directly
+    try {
+      const docRef = doc(db, 'settings', 'userAccounts');
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const cloudData = snap.data() as any;
+        if (cloudData?.admin?.passwordHash && cloudData?.pos?.passwordHash) {
+          const freshAccounts: UserAccountsConfig = {
+            admin: { ...DEFAULT_USER_ACCOUNTS.admin, ...cloudData.admin },
+            pos: { ...DEFAULT_USER_ACCOUNTS.pos, ...cloudData.pos },
+          };
+          cachedUserAccounts = freshAccounts;
+          localStorage.setItem(STORAGE_KEY_USER_ACCOUNTS, JSON.stringify(freshAccounts));
+          idbSet(STORAGE_KEY_USER_ACCOUNTS, freshAccounts).catch(() => {});
+          return this.checkCredentials(username, pass, freshAccounts);
+        }
+      }
+    } catch (err) {
+      console.warn('Firestore live login verification note:', err);
+    }
+
+    return localResult;
+  },
+
+  // Synchronous login helper if needed
+  loginSync(
+    username: string,
+    pass: string
+  ): { success: boolean; role?: UserRole; username?: string; displayName?: string; error?: string } {
+    return this.checkCredentials(username, pass, this.getUserAccounts());
   },
 
   getAuthSession(): AdminAuth | null {

@@ -441,7 +441,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div>
             <div className="flex items-center gap-2 flex-wrap">
               <h3 className="font-orbitron font-bold text-lg text-white">
-                USER ACCOUNTS & PASSWORDS (គ្រប់គ្រងគណនី ២)
+                Users
               </h3>
               <span className="text-[10px] bg-emerald-500/20 text-emerald-300 font-mono px-2 py-0.5 rounded-full border border-emerald-500/40 font-semibold flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -668,10 +668,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 type="button"
                 onClick={() => setIsSingleUploadOpen(true)}
                 className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-orbitron font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
-                title="Upload single product into catalog"
+                title="Upload product into catalog"
               >
                 <i className="fa-solid fa-cloud-arrow-up text-xs"></i>
-                <span>+ Upload Item</span>
+                <span>Upload</span>
               </button>
 
               {/* MULTI-PRODUCT UPLOAD BUTTON */}
@@ -705,10 +705,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     ? 'bg-purple-600 text-white border-purple-400 shadow-neon-purple ring-1 ring-yellow-400'
                     : 'bg-[#131b2e] hover:bg-slate-800 text-yellow-300 border-yellow-500/40 hover:text-white'
                 }`}
-                title="កែប្រែ Username & Password សម្រាប់ Admin & POS"
+                title="Users (Admin & POS)"
               >
                 <i className="fa-solid fa-key text-xs text-yellow-400"></i>
-                <span>Users & PW (កែប្រែគណនី)</span>
+                <span>Users</span>
               </button>
 
               {onOpenPos && (
@@ -716,10 +716,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   type="button"
                   onClick={onOpenPos}
                   className="px-3.5 py-1.5 rounded-lg bg-[#131b2e] hover:bg-slate-800 border border-purple-500/40 text-purple-300 hover:text-white text-xs font-orbitron font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
-                  title="Open POS Cashier Terminal"
+                  title="Open POS"
                 >
                   <i className="fa-solid fa-cash-register text-xs"></i>
-                  <span>POS Terminal</span>
+                  <span>POS</span>
                 </button>
               )}
 
@@ -765,7 +765,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               }`}
             >
               <i className="fa-solid fa-file-invoice-dollar text-emerald-400"></i>
-              <span>DAILY FINANCIAL REPORT (របាយការណ៍)</span>
+              <span>Report</span>
             </button>
 
             {onOpenPos && (
@@ -773,14 +773,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 type="button"
                 onClick={onOpenPos}
                 className="px-4 py-2 rounded-lg text-xs font-orbitron font-bold tracking-wider flex items-center gap-2 transition flex-shrink-0 cursor-pointer bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-neon-cyan"
-                title="Switch directly to POS Cashier Terminal"
+                title="Switch directly to POS Cashier"
               >
                 <i className="fa-solid fa-cash-register text-xs"></i>
-                <span>POS TERMINAL</span>
+                <span>POS</span>
               </button>
             )}
 
-            {/* TAB: USERS & PASSWORDS (PROMINENT TAB) */}
+            {/* TAB: USERS */}
             <button
               onClick={() => setActiveTab('users')}
               className={`px-4 py-2 rounded-lg text-xs font-rajdhani font-bold tracking-wider flex items-center gap-2 transition flex-shrink-0 cursor-pointer ${
@@ -790,7 +790,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               }`}
             >
               <i className="fa-solid fa-users-gear text-yellow-400"></i>
-              <span>🔑 USERS & PASSWORDS (គណនី ២)</span>
+              <span>🔑 Users</span>
             </button>
 
             <button
@@ -1339,7 +1339,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </div>
                 <div>
                   <h4 className="font-orbitron font-bold text-sm text-yellow-300">
-                    USER ACCOUNTS & PASSWORDS (គ្រប់គ្រងគណនី ២)
+                    Users
                   </h4>
                   <p className="text-xs text-gray-300">
                     កំណត់ Username និង Password សម្រាប់ Admin (Full Access) និង POS Cashier (POS Only)
@@ -1351,7 +1351,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 onClick={() => setActiveTab('users')}
                 className="px-4 py-2 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 hover:to-amber-500 text-black font-orbitron font-bold text-xs shadow-md transition flex items-center gap-2 cursor-pointer shrink-0"
               >
-                <span>បើកផ្ទាំងគណនី (USERS & PW)</span>
+                <span>Users</span>
                 <i className="fa-solid fa-arrow-right text-xs"></i>
               </button>
             </div>

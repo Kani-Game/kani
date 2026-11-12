@@ -166,28 +166,6 @@ export const Header: React.FC<HeaderProps> = ({
                 </a>
 
                 <a
-                  href="#external"
-                  onClick={(e) => {
-                    if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
-                      e.preventDefault();
-                      onTabChange('free');
-                    }
-                  }}
-                  className={`px-3.5 py-1.5 rounded-lg font-rajdhani font-bold text-xs tracking-wider transition-all duration-300 flex items-center gap-1.5 cursor-pointer ${
-                    activeTab === 'free'
-                      ? 'bg-gradient-to-r from-cyan-600 to-teal-600 text-white shadow-lg shadow-cyan-900/40'
-                      : 'text-gray-400 hover:text-white hover:bg-cyan-900/20'
-                  }`}
-                  title="Gameថែមពេលទិញ External"
-                >
-                  <i className="fa-solid fa-gift text-cyan-400 text-xs"></i>
-                  <span>GameថែមExternal</span>
-                  <span className="ml-1 text-[10px] bg-cyan-950/80 text-cyan-300 px-1.5 py-0.2 rounded-full border border-cyan-500/30">
-                    {freeCount}
-                  </span>
-                </a>
-
-                <a
                   href="#product"
                   onClick={(e) => {
                     if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
@@ -209,6 +187,28 @@ export const Header: React.FC<HeaderProps> = ({
                   </span>
                 </a>
 
+                <a
+                  href="#external"
+                  onClick={(e) => {
+                    if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
+                      e.preventDefault();
+                      onTabChange('free');
+                    }
+                  }}
+                  className={`px-3.5 py-1.5 rounded-lg font-rajdhani font-bold text-xs tracking-wider transition-all duration-300 flex items-center gap-1.5 cursor-pointer ${
+                    activeTab === 'free'
+                      ? 'bg-gradient-to-r from-cyan-600 to-teal-600 text-white shadow-lg shadow-cyan-900/40'
+                      : 'text-gray-400 hover:text-white hover:bg-cyan-900/20'
+                  }`}
+                  title="Gameថែមពេលទិញ External"
+                >
+                  <i className="fa-solid fa-gift text-cyan-400 text-xs"></i>
+                  <span>GameថែមExternal</span>
+                  <span className="ml-1 text-[10px] bg-cyan-950/80 text-cyan-300 px-1.5 py-0.2 rounded-full border border-cyan-500/30">
+                    {freeCount}
+                  </span>
+                </a>
+
                 {/* POS Cashier Button (Only shown when admin/owner is logged in) */}
                 {isLoggedIn && (
                   <button
@@ -218,7 +218,7 @@ export const Header: React.FC<HeaderProps> = ({
                     title="Open POS Cashier Terminal"
                   >
                     <i className="fa-solid fa-cash-register text-xs"></i>
-                    <span>POS Terminal</span>
+                    <span>POS</span>
                   </button>
                 )}
               </nav>
@@ -385,22 +385,6 @@ export const Header: React.FC<HeaderProps> = ({
               <i className="fa-brands fa-steam"></i> STEAM ({steamCount})
             </a>
             <a
-              href="#external"
-              onClick={(e) => {
-                if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
-                  e.preventDefault();
-                  onTabChange('free');
-                }
-              }}
-              className={`flex-1 py-2 rounded-lg font-rajdhani font-bold text-xs tracking-wider text-center flex items-center justify-center gap-1.5 transition cursor-pointer ${
-                activeTab === 'free'
-                  ? 'bg-cyan-600 text-white shadow-md'
-                  : 'bg-[#131b2e] text-gray-400'
-              }`}
-            >
-              <i className="fa-solid fa-gift"></i> External ({freeCount})
-            </a>
-            <a
               href="#product"
               onClick={(e) => {
                 if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
@@ -415,6 +399,22 @@ export const Header: React.FC<HeaderProps> = ({
               }`}
             >
               <i className="fa-solid fa-box-open"></i> Product ({productCount})
+            </a>
+            <a
+              href="#external"
+              onClick={(e) => {
+                if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
+                  e.preventDefault();
+                  onTabChange('free');
+                }
+              }}
+              className={`flex-1 py-2 rounded-lg font-rajdhani font-bold text-xs tracking-wider text-center flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                activeTab === 'free'
+                  ? 'bg-cyan-600 text-white shadow-md'
+                  : 'bg-[#131b2e] text-gray-400'
+              }`}
+            >
+              <i className="fa-solid fa-gift"></i> External ({freeCount})
             </a>
             {isLoggedIn && (
               <button

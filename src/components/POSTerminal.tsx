@@ -365,7 +365,7 @@ export const POSTerminal: React.FC<POSTerminalProps> = ({
               }
             >
               <i className={`fa-solid ${userRole === 'pos' ? 'fa-lock text-amber-400' : 'fa-file-invoice-dollar text-emerald-400'}`}></i>
-              <span>Financial Report (របាយការណ៍)</span>
+              <span>Report</span>
             </button>
 
             {/* Logout */}
@@ -874,7 +874,7 @@ export const POSTerminal: React.FC<POSTerminalProps> = ({
                   <i className="fa-solid fa-file-invoice-dollar text-lg"></i>
                 </div>
                 <div>
-                  <h3 className="font-orbitron font-bold text-base text-white">DAILY FINANCIAL REPORT</h3>
+                  <h3 className="font-orbitron font-bold text-base text-white">Report</h3>
                   <p className="text-xs text-gray-400">POS Integrated Profit Ledger & Google Sheets Summary</p>
                 </div>
               </div>

@@ -136,6 +136,9 @@ export default function App() {
     // Real-Time Cloud Firestore Sync for Financial Report Rows (keeps local cache fresh across all tabs)
     const unsubscribeCloudReportRows = StorageService.subscribeToReportRows(() => {});
 
+    // Real-Time Cloud Firestore Sync for User Accounts & Passwords (guarantees all tabs & devices are in lockstep)
+    const unsubscribeCloudUserAccounts = StorageService.subscribeToUserAccounts(() => {});
+
     const initialTab = getTabFromUrl();
     const initialPos = getIsPosFromUrl();
     const initialAdmin = getIsAdminFromUrl();
@@ -260,6 +263,7 @@ export default function App() {
       unsubscribeCloudGames();
       unsubscribeCloudSettings();
       unsubscribeCloudReportRows();
+      unsubscribeCloudUserAccounts();
       window.removeEventListener('hashchange', syncFromUrl);
       window.removeEventListener('popstate', syncFromUrl);
       window.removeEventListener('keydown', handleKeyDown);
@@ -508,8 +512,8 @@ export default function App() {
   };
 
   // Admin & POS Authentication Actions
-  const handleAdminLogin = (u: string, p: string) => {
-    const result = StorageService.login(u, p);
+  const handleAdminLogin = async (u: string, p: string) => {
+    const result = await StorageService.login(u, p);
     if (result.success) {
       setIsLoggedIn(true);
       setCurrentUserRole(result.role || 'admin');
@@ -548,7 +552,7 @@ export default function App() {
     setCurrentUsername('');
     setIsAdminView(false);
     setIsPosView(false);
-    window.location.hash = activeTab === 'steam' ? '#steam' : '#external';
+    window.location.hash = activeTab === 'steam' ? '#steam' : activeTab === 'product' ? '#product' : '#external';
     showToast('Logged out successfully.');
   };
 
@@ -703,7 +707,7 @@ export default function App() {
           onDeleteProduct={handleDeleteGame}
           onSwitchToStore={() => {
             setIsPosView(false);
-            window.location.hash = activeTab === 'steam' ? '#steam' : '#external';
+            window.location.hash = activeTab === 'steam' ? '#steam' : activeTab === 'product' ? '#product' : '#external';
           }}
           onSwitchToAdmin={() => {
             const role = StorageService.getCurrentUserRole();
@@ -916,7 +920,7 @@ export default function App() {
                     title="Open POS Terminal"
                   >
                     <i className="fa-solid fa-cash-register text-xs"></i>
-                    <span>POS Terminal</span>
+                    <span>POS</span>
                   </button>
 
                   <button

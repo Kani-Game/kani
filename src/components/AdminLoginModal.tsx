@@ -11,7 +11,7 @@ interface LoginResult {
 interface AdminLoginModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onLogin: (user: string, pass: string) => LoginResult;
+  onLogin: (user: string, pass: string) => LoginResult | Promise<LoginResult>;
   onLoginSuccess: (destination: 'admin' | 'pos', role?: UserRole) => void;
   targetDestination?: 'admin' | 'pos';
 }
@@ -45,7 +45,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -54,20 +54,24 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
       return;
     }
 
-    const result = onLogin(username.trim(), password);
-    if (result.success) {
-      // If user logged in with POS account but requested Admin Panel, enforce POS-only restriction
-      if (result.role === 'pos' && destination === 'admin') {
-        setError('គណនី POS ត្រូវបានកំណត់ឱ្យប្រើប្រាស់តែលើ POS Terminal ប៉ុណ្ណោះ! (មិនមានសិទ្ធិចូល Admin ទេ)');
-        return;
-      }
+    try {
+      const result = await onLogin(username.trim(), password);
+      if (result.success) {
+        // If user logged in with POS account but requested Admin Panel, enforce POS-only restriction
+        if (result.role === 'pos' && destination === 'admin') {
+          setError('គណនី POS ត្រូវបានកំណត់ឱ្យប្រើប្រាស់តែលើ POS Terminal ប៉ុណ្ណោះ! (មិនមានសិទ្ធិចូល Admin ទេ)');
+          return;
+        }
 
-      setPassword('');
-      setError(null);
-      onLoginSuccess(result.role === 'pos' ? 'pos' : destination, result.role);
-      onClose();
-    } else {
-      setError(result.error || 'Username ឬ Password មិនត្រឹមត្រូវទេ! (Incorrect credentials)');
+        setPassword('');
+        setError(null);
+        onLoginSuccess(result.role === 'pos' ? 'pos' : destination, result.role);
+        onClose();
+      } else {
+        setError(result.error || 'Username ឬ Password មិនត្រឹមត្រូវទេ! (Incorrect credentials)');
+      }
+    } catch {
+      setError('មានបញ្ហាក្នុងការផ្ទៀងផ្ទាត់ សូមព្យាយាមម្តងទៀត');
     }
   };
 
