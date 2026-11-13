@@ -57,8 +57,6 @@ export const Header: React.FC<HeaderProps> = ({
       setLogoTapCount(0);
     }, 2500);
 
-    if (isAdminView) onToggleAdminView();
-    if (isPosView) onTogglePosView();
     onTabChange('steam');
     onClearSearch();
   };
@@ -239,10 +237,7 @@ export const Header: React.FC<HeaderProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => {
-                    onTogglePosView();
-                    onToggleAdminView();
-                  }}
+                  onClick={onToggleAdminView}
                   className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-orbitron font-bold bg-[#131b2e] hover:bg-purple-900/40 text-purple-300 border border-purple-500/40 transition cursor-pointer"
                   title="Switch to Admin Dashboard"
                 >
@@ -275,10 +270,7 @@ export const Header: React.FC<HeaderProps> = ({
 
                 <button
                   type="button"
-                  onClick={() => {
-                    onToggleAdminView();
-                    onTogglePosView();
-                  }}
+                  onClick={onTogglePosView}
                   className="flex items-center gap-1.5 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-orbitron font-bold bg-gradient-to-r from-cyan-600 to-blue-600 text-white border border-cyan-400/50 shadow-neon-cyan transition cursor-pointer"
                   title="Launch POS Terminal"
                 >

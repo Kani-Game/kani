@@ -42,7 +42,7 @@ export const POSTerminal: React.FC<POSTerminalProps> = ({
   // Sales & Catalog state
   const [sales, setSales] = useState<POSSaleRecord[]>(() => StorageService.getSales());
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [selectedCategory, setSelectedCategory] = useState<string>('steam');
   const [cart, setCart] = useState<POSCartItem[]>([]);
 
   // Customer info & Discounts
@@ -413,17 +413,6 @@ export const POSTerminal: React.FC<POSTerminalProps> = ({
           {/* Quick Category Filter Pills */}
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none text-xs">
             <button
-              onClick={() => setSelectedCategory('all')}
-              className={`px-3 py-1.5 rounded-lg font-rajdhani font-bold whitespace-nowrap transition cursor-pointer ${
-                selectedCategory === 'all'
-                  ? 'bg-purple-600 text-white shadow'
-                  : 'bg-[#131b2e] text-gray-400 hover:text-white border border-purple-900/40'
-              }`}
-            >
-              All Items ({games.length})
-            </button>
-
-            <button
               onClick={() => setSelectedCategory('steam')}
               className={`px-3 py-1.5 rounded-lg font-rajdhani font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1.5 ${
                 selectedCategory === 'steam'
@@ -433,6 +422,18 @@ export const POSTerminal: React.FC<POSTerminalProps> = ({
             >
               <i className="fa-brands fa-steam"></i>
               <span>Steam Offline</span>
+            </button>
+
+            <button
+              onClick={() => setSelectedCategory('product')}
+              className={`px-3 py-1.5 rounded-lg font-rajdhani font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1.5 ${
+                selectedCategory === 'product'
+                  ? 'bg-sky-600 text-white shadow'
+                  : 'bg-[#131b2e] text-sky-400 hover:text-white border border-sky-900/40'
+              }`}
+            >
+              <i className="fa-solid fa-box-open text-sky-400"></i>
+              <span>Product ({games.filter((g) => g.tag.toLowerCase().includes('product')).length})</span>
             </button>
 
             <button
@@ -448,15 +449,14 @@ export const POSTerminal: React.FC<POSTerminalProps> = ({
             </button>
 
             <button
-              onClick={() => setSelectedCategory('product')}
-              className={`px-3 py-1.5 rounded-lg font-rajdhani font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1.5 ${
-                selectedCategory === 'product'
-                  ? 'bg-sky-600 text-white shadow'
-                  : 'bg-[#131b2e] text-sky-400 hover:text-white border border-sky-900/40'
+              onClick={() => setSelectedCategory('all')}
+              className={`px-3 py-1.5 rounded-lg font-rajdhani font-bold whitespace-nowrap transition cursor-pointer ${
+                selectedCategory === 'all'
+                  ? 'bg-purple-600 text-white shadow'
+                  : 'bg-[#131b2e] text-gray-400 hover:text-white border border-purple-900/40'
               }`}
             >
-              <i className="fa-solid fa-box-open text-sky-400"></i>
-              <span>Product ({games.filter((g) => g.tag.toLowerCase().includes('product')).length})</span>
+              All Items ({games.length})
             </button>
 
             {categories

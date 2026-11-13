@@ -26,7 +26,7 @@ interface AdminDashboardProps {
   onRefreshGames?: () => void;
 }
 
-type AdminTab = 'games' | 'reports' | 'settings' | 'users' | 'backup';
+type AdminTab = 'games' | 'reports' | 'settings' | 'backup';
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   games,
@@ -41,8 +41,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onUpdateCredentials,
   onExportBackup,
   onImportBackup,
-  onLogout,
-  onCloseAdmin,
+  onLogout: _onLogout,
+  onCloseAdmin: _onCloseAdmin,
   onOpenPos,
   onShowToast,
   onRefreshGames,
@@ -654,14 +654,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             </div>
 
-            {/* Quick Metrics & Exit */}
-            <div className="flex items-center gap-3 flex-wrap">
-              <div className="flex items-center gap-2 bg-[#131b2e] px-3 py-1.5 rounded-lg border border-purple-900/40 text-xs">
-                <span className="text-gray-400">Catalog Total:</span>
-                <span className="font-orbitron font-bold text-purple-400">
-                  {games.length}
-                </span>
-              </div>
+            {/* Quick Metrics, Actions & Tab Navigation */}
+            <div className="flex items-center gap-2 sm:gap-2.5 flex-wrap">
+              <button
+                type="button"
+                onClick={() => setActiveTab('games')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-rajdhani font-bold tracking-wider flex items-center gap-1.5 transition flex-shrink-0 cursor-pointer border ${
+                  activeTab === 'games'
+                    ? 'bg-purple-600 text-white border-purple-400 shadow-md'
+                    : 'bg-[#131b2e] text-gray-300 border-purple-900/40 hover:text-white hover:bg-purple-900/30'
+                }`}
+              >
+                <i className="fa-solid fa-layer-group"></i>
+                <span>CATALOG ({games.length})</span>
+              </button>
+
+              {/* REPORT BUTTON */}
+              <button
+                type="button"
+                onClick={() => setActiveTab('reports')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-orbitron font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer border ${
+                  activeTab === 'reports'
+                    ? 'bg-emerald-600 text-white border-emerald-400 shadow-md shadow-emerald-950/60'
+                    : 'bg-[#131b2e] hover:bg-emerald-950/40 text-emerald-300 border-emerald-500/40 hover:text-white'
+                }`}
+                title="Open Financial Report"
+              >
+                <i className="fa-solid fa-file-invoice-dollar text-xs text-emerald-400"></i>
+                <span>Report</span>
+              </button>
 
               {/* SINGLE PRODUCT UPLOAD BUTTON */}
               <button
@@ -685,137 +706,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span>+ Multi-Upload</span>
               </button>
 
-              {/* QR CODE UPLOAD BUTTON */}
               <button
                 type="button"
-                onClick={() => setIsQrModalOpen(true)}
-                className="px-3.5 py-1.5 rounded-lg bg-[#131b2e] hover:bg-slate-800 border border-cyan-500/40 text-cyan-300 text-xs font-orbitron font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
-                title="Upload payment QR code for ABA KHQR / Bakong"
-              >
-                <i className="fa-solid fa-qrcode text-xs text-cyan-400"></i>
-                <span>QR Upload</span>
-              </button>
-
-              {/* DIRECT ACCESS TO USERS & PASSWORDS */}
-              <button
-                type="button"
-                onClick={() => setActiveTab('users')}
-                className={`px-3.5 py-1.5 rounded-lg text-xs font-orbitron font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer border ${
-                  activeTab === 'users'
-                    ? 'bg-purple-600 text-white border-purple-400 shadow-neon-purple ring-1 ring-yellow-400'
-                    : 'bg-[#131b2e] hover:bg-slate-800 text-yellow-300 border-yellow-500/40 hover:text-white'
+                onClick={() => setActiveTab('settings')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-rajdhani font-bold tracking-wider flex items-center gap-1.5 transition flex-shrink-0 cursor-pointer border ${
+                  activeTab === 'settings'
+                    ? 'bg-purple-600 text-white border-purple-400 shadow-md'
+                    : 'bg-[#131b2e] text-gray-300 border-purple-900/40 hover:text-white hover:bg-purple-900/30'
                 }`}
-                title="Users (Admin & POS)"
               >
-                <i className="fa-solid fa-key text-xs text-yellow-400"></i>
-                <span>Users</span>
-              </button>
-
-              {onOpenPos && (
-                <button
-                  type="button"
-                  onClick={onOpenPos}
-                  className="px-3.5 py-1.5 rounded-lg bg-[#131b2e] hover:bg-slate-800 border border-purple-500/40 text-purple-300 hover:text-white text-xs font-orbitron font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
-                  title="Open POS"
-                >
-                  <i className="fa-solid fa-cash-register text-xs"></i>
-                  <span>POS</span>
-                </button>
-              )}
-
-              <button
-                onClick={onCloseAdmin}
-                className="px-3.5 py-1.5 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
-              >
-                <i className="fa-solid fa-store"></i>
-                <span>View Storefront</span>
+                <i className="fa-solid fa-gear"></i>
+                <span>Settings</span>
               </button>
 
               <button
-                onClick={onLogout}
-                className="px-3.5 py-1.5 rounded-lg bg-red-950/40 hover:bg-red-900/60 text-red-300 border border-red-800/40 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer"
-                title="Sign out of Admin Dashboard"
+                type="button"
+                onClick={() => setActiveTab('backup')}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-rajdhani font-bold tracking-wider flex items-center gap-1.5 transition flex-shrink-0 cursor-pointer border ${
+                  activeTab === 'backup'
+                    ? 'bg-purple-600 text-white border-purple-400 shadow-md'
+                    : 'bg-[#131b2e] text-gray-300 border-purple-900/40 hover:text-white hover:bg-purple-900/30'
+                }`}
               >
-                <i className="fa-solid fa-arrow-right-from-bracket"></i>
-                <span>Logout</span>
+                <i className="fa-solid fa-database"></i>
+                <span>BACKUP & RESTORE</span>
               </button>
             </div>
-          </div>
-
-          {/* Sub Navigation Tabs */}
-          <div className="flex space-x-1 sm:space-x-2 border-t border-purple-900/30 pt-2 pb-2 overflow-x-auto">
-            <button
-              onClick={() => setActiveTab('games')}
-              className={`px-4 py-2 rounded-lg text-xs font-rajdhani font-bold tracking-wider flex items-center gap-2 transition flex-shrink-0 cursor-pointer ${
-                activeTab === 'games'
-                  ? 'bg-purple-600 text-white shadow-md'
-                  : 'text-gray-400 hover:text-white hover:bg-purple-900/20'
-              }`}
-            >
-              <i className="fa-solid fa-layer-group"></i>
-              <span>CATALOG ({games.length})</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('reports')}
-              className={`px-4 py-2 rounded-lg text-xs font-rajdhani font-bold tracking-wider flex items-center gap-2 transition flex-shrink-0 cursor-pointer ${
-                activeTab === 'reports'
-                  ? 'bg-emerald-600 text-white shadow-md shadow-emerald-950/60'
-                  : 'text-emerald-400/90 hover:text-white hover:bg-emerald-950/30 border border-emerald-800/40'
-              }`}
-            >
-              <i className="fa-solid fa-file-invoice-dollar text-emerald-400"></i>
-              <span>Report</span>
-            </button>
-
-            {onOpenPos && (
-              <button
-                type="button"
-                onClick={onOpenPos}
-                className="px-4 py-2 rounded-lg text-xs font-orbitron font-bold tracking-wider flex items-center gap-2 transition flex-shrink-0 cursor-pointer bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white shadow-neon-cyan"
-                title="Switch directly to POS Cashier"
-              >
-                <i className="fa-solid fa-cash-register text-xs"></i>
-                <span>POS</span>
-              </button>
-            )}
-
-            {/* TAB: USERS */}
-            <button
-              onClick={() => setActiveTab('users')}
-              className={`px-4 py-2 rounded-lg text-xs font-rajdhani font-bold tracking-wider flex items-center gap-2 transition flex-shrink-0 cursor-pointer ${
-                activeTab === 'users'
-                  ? 'bg-gradient-to-r from-purple-600 via-indigo-600 to-purple-700 text-white shadow-md shadow-purple-950/60 ring-2 ring-yellow-400/70'
-                  : 'text-yellow-300 hover:text-white hover:bg-purple-900/30 border border-yellow-500/40'
-              }`}
-            >
-              <i className="fa-solid fa-users-gear text-yellow-400"></i>
-              <span>🔑 Users</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('settings')}
-              className={`px-4 py-2 rounded-lg text-xs font-rajdhani font-bold tracking-wider flex items-center gap-2 transition flex-shrink-0 cursor-pointer ${
-                activeTab === 'settings'
-                  ? 'bg-purple-600 text-white shadow-md'
-                  : 'text-gray-400 hover:text-white hover:bg-purple-900/20'
-              }`}
-            >
-              <i className="fa-solid fa-gear"></i>
-              <span>⚙️ SETTINGS (ការកំណត់ទូទៅ & TELEGRAM)</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('backup')}
-              className={`px-4 py-2 rounded-lg text-xs font-rajdhani font-bold tracking-wider flex items-center gap-2 transition flex-shrink-0 cursor-pointer ${
-                activeTab === 'backup'
-                  ? 'bg-purple-600 text-white shadow-md'
-                  : 'text-gray-400 hover:text-white hover:bg-purple-900/20'
-              }`}
-            >
-              <i className="fa-solid fa-database"></i>
-              <span>BACKUP & RESTORE</span>
-            </button>
           </div>
         </div>
       </div>
@@ -825,37 +741,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         {/* TAB 1: GAMES CATALOG MANAGER */}
         {activeTab === 'games' && (
           <div className="space-y-6">
-            {/* Prominent POS Launch Callout Banner */}
-            {onOpenPos && (
-              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-r from-cyan-950/70 via-[#131b2e] to-purple-950/70 border border-cyan-500/40 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-                <div className="flex items-center gap-3.5">
-                  <div className="w-12 h-12 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-white text-xl shadow-neon-cyan shrink-0">
-                    <i className="fa-solid fa-cash-register"></i>
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h3 className="font-orbitron font-bold text-base text-white">
-                        POINT OF SALE (POS) CASHIER
-                      </h3>
-                      <span className="text-[10px] bg-green-950/90 text-green-400 border border-green-500/40 px-2 py-0.5 rounded-full font-mono font-bold">
-                        ACTIVE
-                      </span>
-                    </div>
-                    <p className="text-xs text-cyan-200/80 font-rajdhani mt-0.5">
-                      Barcode Scanning • Multi-Upload Products • Printable Receipts with Short Descriptions • ABA KHQR
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={onOpenPos}
-                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 via-teal-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-orbitron font-bold text-xs sm:text-sm shadow-neon-cyan flex items-center gap-2 cursor-pointer transition hover:scale-102 shrink-0"
-                >
-                  <i className="fa-solid fa-cash-register"></i>
-                  <span>LAUNCH POS TERMINAL →</span>
-                </button>
-              </div>
-            )}
             {/* Control Bar */}
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-[#0f172a] p-4 rounded-xl border border-purple-900/40">
               <div className="flex flex-wrap items-center gap-3 flex-1">
@@ -885,8 +770,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
 
               {/* Actions */}
-              <div className="flex items-center gap-2 flex-wrap">
-                {selectedGameIds.length > 0 && (
+              {selectedGameIds.length > 0 && (
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
                     type="button"
                     onClick={handleBatchDelete}
@@ -895,50 +780,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <i className="fa-solid fa-trash-can"></i>
                     <span>Delete Selected ({selectedGameIds.length})</span>
                   </button>
-                )}
-
-                <button
-                  type="button"
-                  onClick={() => setIsSingleUploadOpen(true)}
-                  className="px-4 py-2 rounded-lg bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-bold font-orbitron flex items-center gap-2 shadow-lg shadow-purple-950/60 transition cursor-pointer"
-                  title="Upload a single product/game"
-                >
-                  <i className="fa-solid fa-cloud-arrow-up"></i>
-                  <span>+ UPLOAD PRODUCT</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setIsMultiUploadOpen(true)}
-                  className="px-4 py-2 rounded-lg bg-gradient-to-r from-cyan-600 via-teal-500 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-bold font-orbitron flex items-center gap-2 shadow-neon-cyan transition cursor-pointer"
-                  title="Batch upload multiple products or images"
-                >
-                  <i className="fa-solid fa-layer-group"></i>
-                  <span>+ MULTI-UPLOAD</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setIsQrModalOpen(true)}
-                  className="px-3.5 py-2 rounded-lg bg-[#131b2e] hover:bg-slate-800 border border-cyan-500/40 text-cyan-300 text-xs font-bold font-orbitron flex items-center gap-2 transition shadow-sm cursor-pointer"
-                  title="Upload and configure ABA KHQR payment code"
-                >
-                  <i className="fa-solid fa-qrcode text-cyan-400"></i>
-                  <span>QR UPLOAD</span>
-                </button>
-
-                {onOpenPos && (
-                  <button
-                    type="button"
-                    onClick={onOpenPos}
-                    className="px-3.5 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-purple-500/30 text-purple-300 hover:text-white text-xs font-bold font-orbitron flex items-center gap-2 transition cursor-pointer"
-                    title="Open POS Terminal Cashier"
-                  >
-                    <i className="fa-solid fa-cash-register"></i>
-                    <span>POS CASHIER</span>
-                  </button>
-                )}
-              </div>
+                </div>
+              )}
             </div>
 
             {/* Quick Summary Pill Bar */}
@@ -1321,40 +1164,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <DailyFinancialReport onShowToast={onShowToast} />
         )}
 
-        {/* TAB: USERS & PASSWORDS MANAGER (DEDICATED FULL TAB) */}
-        {activeTab === 'users' && (
-          <div className="max-w-5xl mx-auto space-y-6">
-            {renderUserAccountsSection()}
-          </div>
-        )}
-
         {/* TAB: SETTINGS & TELEGRAM */}
         {activeTab === 'settings' && (
           <div className="max-w-4xl mx-auto space-y-8">
-            {/* Quick Banner to jump to Users & Passwords Tab */}
-            <div className="bg-gradient-to-r from-purple-950/90 via-[#131b2e] to-indigo-950/90 p-4 sm:p-5 rounded-2xl border-2 border-yellow-500/50 shadow-xl flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-xl bg-yellow-500/20 border border-yellow-500/40 flex items-center justify-center text-yellow-300 text-lg shrink-0">
-                  <i className="fa-solid fa-key"></i>
-                </div>
-                <div>
-                  <h4 className="font-orbitron font-bold text-sm text-yellow-300">
-                    Users
-                  </h4>
-                  <p className="text-xs text-gray-300">
-                    កំណត់ Username និង Password សម្រាប់ Admin (Full Access) និង POS Cashier (POS Only)
-                  </p>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActiveTab('users')}
-                className="px-4 py-2 rounded-xl bg-gradient-to-r from-yellow-500 to-amber-600 hover:from-yellow-400 hover:to-amber-500 text-black font-orbitron font-bold text-xs shadow-md transition flex items-center gap-2 cursor-pointer shrink-0"
-              >
-                <span>Users</span>
-                <i className="fa-solid fa-arrow-right text-xs"></i>
-              </button>
-            </div>
             {/* General Site & Telegram Settings Form */}
             <div className="bg-[#0f172a] p-6 sm:p-8 rounded-2xl border border-purple-500/40 shadow-2xl">
               <div className="flex items-center gap-3 mb-6 pb-4 border-b border-purple-900/40">

@@ -288,9 +288,19 @@ export default function App() {
       showToast('POS Terminal ទាមទារ Username និង Password របស់ Admin!', 'info');
       return;
     }
+    if (isPosView) {
+      setIsPosView(false);
+      const targetHash = activeTab === 'steam' ? '#steam' : activeTab === 'product' ? '#product' : '#external';
+      if (window.location.hash !== targetHash) {
+        window.location.hash = targetHash;
+      }
+      return;
+    }
     setIsAdminView(false);
     setIsPosView(true);
-    window.location.hash = '#pos';
+    if (window.location.hash !== '#pos') {
+      window.location.hash = '#pos';
+    }
   };
 
   const handleOpenAdmin = () => {
@@ -306,8 +316,19 @@ export default function App() {
       setIsLoginModalOpen(true);
       return;
     }
+    if (isAdminView) {
+      setIsAdminView(false);
+      const targetHash = activeTab === 'steam' ? '#steam' : activeTab === 'product' ? '#product' : '#external';
+      if (window.location.hash !== targetHash) {
+        window.location.hash = targetHash;
+      }
+      return;
+    }
     setIsPosView(false);
     setIsAdminView(true);
+    if (window.location.hash !== '#admin') {
+      window.location.hash = '#admin';
+    }
   };
 
   // Secret Admin / POS triggers (for 5-tap gesture on logo or footer)
@@ -688,7 +709,13 @@ export default function App() {
           onExportBackup={handleExportBackup}
           onImportBackup={handleImportBackup}
           onLogout={handleAdminLogout}
-          onCloseAdmin={() => setIsAdminView(false)}
+          onCloseAdmin={() => {
+            setIsAdminView(false);
+            const targetHash = activeTab === 'steam' ? '#steam' : activeTab === 'product' ? '#product' : '#external';
+            if (window.location.hash !== targetHash) {
+              window.location.hash = targetHash;
+            }
+          }}
           onOpenPos={() => {
             setIsAdminView(false);
             setIsPosView(true);
