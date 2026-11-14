@@ -8,7 +8,6 @@ interface HeroBannerProps {
   freeCount: number;
   totalCount: number;
   onOpenTelegram: () => void;
-  onBrowseCatalog?: () => void;
   canEditCover?: boolean;
   onEditCover?: () => void;
 }
@@ -19,15 +18,12 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
   freeCount,
   totalCount,
   onOpenTelegram,
-  onBrowseCatalog,
   canEditCover = false,
   onEditCover,
 }) => {
   const [isVideoMuted, setIsVideoMuted] = useState(true);
 
-  const telegramLabel = settings.telegramAdminHandle
-    ? `ORDER ${settings.telegramAdminHandle.toUpperCase()}`
-    : 'ORDER @KANIGAME168';
+  const telegramLabel = 'ទាក់ទង Admin';
 
   const coverMainTitle = (settings.heroMainTitle ?? 'KANI GAME').trim() || 'KANI GAME';
   const coverTitleParts = coverMainTitle.split(/\s+/);
@@ -42,17 +38,6 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
   const isDefaultRightImg = rightCoverImg === DEFAULT_COVER_IMAGE;
   const coverVideoUrl = settings.heroCoverVideo?.trim() || '';
   const youtubeId = mediaType === 'video' ? extractYouTubeVideoId(coverVideoUrl) : null;
-
-  const handleBrowse = () => {
-    if (onBrowseCatalog) {
-      onBrowseCatalog();
-      return;
-    }
-    const el = document.getElementById('catalog-section');
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }
-  };
 
   return (
     <section className="relative mb-8 py-4 select-none">
@@ -308,7 +293,7 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
             {settings.heroDescription}
           </p>
 
-          {/* Dual Centered CTA Buttons */}
+          {/* Centered CTA Button */}
           <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4 mb-5">
             <button
               type="button"
@@ -317,14 +302,6 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
             >
               <i className="fa-brands fa-telegram text-base"></i>
               <span>{telegramLabel}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={handleBrowse}
-              className="inline-flex items-center justify-center gap-2 px-5 sm:px-6 py-2.5 rounded-lg text-xs sm:text-sm font-orbitron font-bold text-gray-100 bg-[#120e29]/85 hover:bg-purple-950/70 border border-purple-500/40 hover:border-cyan-400/60 transition-all duration-200 hover:-translate-y-0.5 whitespace-nowrap shrink-0 cursor-pointer"
-            >
-              <span>BROWSE CATALOG</span>
             </button>
           </div>
 

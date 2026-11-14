@@ -829,12 +829,6 @@ export default function App() {
               const handle = settings.telegramAdminHandle.replace('@', '');
               window.open(`https://t.me/${handle}`, '_blank');
             }}
-            onBrowseCatalog={() => {
-              const el = document.getElementById('catalog-section');
-              if (el) {
-                el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-              }
-            }}
           />
 
           {/* Category Header & Filter Controls */}
