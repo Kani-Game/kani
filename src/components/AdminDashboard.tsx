@@ -1,9 +1,12 @@
-import React, { useState, useEffect, useId, useRef } from 'react';
+import React, { useState, useEffect, useId, useRef, useCallback } from 'react';
 import { Game, SiteSettings, UserAccountsConfig, UserRole } from '../types/game';
 import { StorageService } from '../services/storageService';
 import { POSUploadProductModal } from './POSUploadProductModal';
 import { POSMultiUploadModal } from './POSMultiUploadModal';
 import { DailyFinancialReport } from './DailyFinancialReport';
+import { GameModal } from './GameModal';
+import { CoverMediaForm } from './CoverMediaModal';
+import { extractSteamAppId, fetchSteamSpec } from '../services/steamService';
 import { compressImageFile } from '../utils/imageUtils';
 
 interface AdminDashboardProps {
@@ -64,6 +67,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [formPrice, setFormPrice] = useState('');
   const [formCostPrice, setFormCostPrice] = useState('0');
   const [previewError, setPreviewError] = useState(false);
+  const [editSteamLink, setEditSteamLink] = useState('');
+  const [editSteamGenres, setEditSteamGenres] = useState<string[]>([]);
+  const [isEditSteamFetching, setIsEditSteamFetching] = useState(false);
+  const [editSteamFeedback, setEditSteamFeedback] = useState<{
+    type: 'success' | 'error' | 'info';
+    text: string;
+  } | null>(null);
+  const lastEditSteamAppIdRef = useRef<number | null>(null);
+  const [specInspectGame, setSpecInspectGame] = useState<Game | null>(null);
 
 
 
@@ -186,15 +198,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         ? true
         : tagFilter === 'product'
         ? g.tag.toLowerCase().includes('product')
+        : tagFilter === 'steam-online'
+        ? g.tag.toLowerCase().includes('steam') && g.tag.toLowerCase().includes('online')
         : tagFilter === 'steam'
-        ? g.tag.toLowerCase().includes('steam')
+        ? g.tag.toLowerCase().includes('steam') && !g.tag.toLowerCase().includes('online')
         : !g.tag.toLowerCase().includes('steam') && !g.tag.toLowerCase().includes('product');
     return matchesSearch && matchesTag;
   });
 
-  const steamCount = games.filter((g) => g.tag.toLowerCase().includes('steam')).length;
+  const steamCount = games.filter((g) => {
+    const lower = g.tag.toLowerCase();
+    return lower.includes('steam') && !lower.includes('online');
+  }).length;
+  const steamOnlineCount = games.filter((g) => {
+    const lower = g.tag.toLowerCase();
+    return lower.includes('steam') && lower.includes('online');
+  }).length;
   const productCount = games.filter((g) => g.tag.toLowerCase().includes('product')).length;
-  const freeCount = games.length - steamCount - productCount;
+  const freeCount = games.length - steamCount - steamOnlineCount - productCount;
 
   // Edit Game Handlers (Editing existing games in Catalog)
   const handleStartEdit = (game: Game) => {
@@ -208,6 +229,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setFormPrice(game.price !== undefined ? game.price.toString() : '');
     setFormCostPrice(game.costPrice !== undefined ? game.costPrice.toString() : '0');
     setPreviewError(false);
+    const initialSteamId = extractSteamAppId(game.link);
+    setEditSteamLink(initialSteamId && game.link ? game.link : '');
+    setEditSteamGenres([]);
+    lastEditSteamAppIdRef.current = initialSteamId;
+    setEditSteamFeedback(null);
   };
 
   const handleCancelEdit = () => {
@@ -217,7 +243,89 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setFormPrice('');
     setFormCostPrice('0');
     setPreviewError(false);
+    setEditSteamLink('');
+    setEditSteamGenres([]);
+    setEditSteamFeedback(null);
+    lastEditSteamAppIdRef.current = null;
   };
+
+  const handleEditSteamFetch = useCallback(
+    async (mode: 'link' | 'name', explicitLink?: string) => {
+      const targetLink = (explicitLink !== undefined ? explicitLink : editSteamLink).trim();
+      const targetName = formName.trim();
+
+      if (mode === 'link' && !targetLink) {
+        setEditSteamFeedback({
+          type: 'error',
+          text: 'Please paste a Steam Store URL or App ID first.',
+        });
+        return;
+      }
+      if (mode === 'name' && !targetName) {
+        setEditSteamFeedback({
+          type: 'error',
+          text: 'Please enter a game title before clicking Find.',
+        });
+        return;
+      }
+
+      setIsEditSteamFetching(true);
+      setEditSteamFeedback({
+        type: 'info',
+        text:
+          mode === 'link'
+            ? 'Fetching exact Steam game details & verified cover...'
+            : `Searching Steam Store for "${targetName}"...`,
+      });
+
+      try {
+        const spec = await fetchSteamSpec(
+          mode === 'link' ? { link: targetLink } : { name: targetName }
+        );
+        lastEditSteamAppIdRef.current = spec.appId;
+
+        setFormName(spec.matchedName);
+        setEditSteamGenres(Array.isArray(spec.genres) ? spec.genres : []);
+        const resolvedGenre =
+          spec.primaryGenre || (Array.isArray(spec.genres) ? spec.genres[0] || '' : '');
+        if (resolvedGenre) setFormGenre(resolvedGenre);
+        if (spec.coverImage) {
+          setFormImg(spec.coverImage);
+          setPreviewError(false);
+        }
+        setFormLink(spec.steamUrl);
+        setEditSteamLink(spec.steamUrl);
+        // Never overwrite formDesc from Steam data
+        setEditSteamFeedback({
+          type: 'success',
+          text: `Synced "${spec.matchedName}" (App ID: ${spec.appId}) — Name, Cover, Genre & Steam Link updated.`,
+        });
+      } catch (err) {
+        setEditSteamFeedback({
+          type: 'error',
+          text:
+            err instanceof Error
+              ? err.message
+              : 'Could not fetch details from Steam Store.',
+        });
+      } finally {
+        setIsEditSteamFetching(false);
+      }
+    },
+    [editSteamLink, formName]
+  );
+
+  // Auto-fetch when a valid Steam link or App ID is entered/pasted in Edit Modal
+  useEffect(() => {
+    if (!editingGame) return;
+    const detectedAppId = extractSteamAppId(editSteamLink);
+    if (!detectedAppId || detectedAppId === lastEditSteamAppIdRef.current) return;
+
+    const timer = window.setTimeout(() => {
+      void handleEditSteamFetch('link', editSteamLink);
+    }, 280);
+    return () => window.clearTimeout(timer);
+  }, [editingGame, editSteamLink, handleEditSteamFetch]);
 
   const handleSingleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -764,6 +872,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 >
                   <option value="all">All Categories ({games.length})</option>
                   <option value="steam">Steam Offline ({steamCount})</option>
+                  <option value="steam-online">Steam Online ({steamOnlineCount})</option>
                   <option value="product">Product ({productCount})</option>
                   <option value="free">Gameថែមពេលទិញ External ({freeCount})</option>
                 </select>
@@ -920,6 +1029,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   type="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
+                                    setSpecInspectGame(game);
+                                  }}
+                                  className="p-1.5 bg-cyan-950/60 hover:bg-cyan-900/70 text-cyan-300 rounded-lg border border-cyan-600/40 transition cursor-pointer"
+                                  title="View PC System Requirements (Steam Spec)"
+                                >
+                                  <i className="fa-solid fa-microchip"></i>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
                                     handleStartEdit(game);
                                   }}
                                   className="p-1.5 bg-purple-900/40 hover:bg-purple-800/60 text-purple-300 rounded-lg border border-purple-700/40 transition cursor-pointer"
@@ -984,15 +1104,88 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
 
               <form onSubmit={handleSubmitSingleGame} className="space-y-4">
+                {/* Steam Store Link (Auto-Fill) Above Game Title */}
+                <div className="p-3 rounded-xl bg-gradient-to-br from-[#131c34] to-[#10172b] border border-cyan-500/35 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="text-xs font-semibold text-cyan-300 uppercase tracking-wider flex items-center gap-1.5">
+                      <i className="fa-brands fa-steam text-sm"></i>
+                      <span>Steam Store Link (Auto)</span>
+                    </label>
+                    <span className="text-[10px] text-gray-400">
+                      Auto-fills Name, Cover, Genre &amp; Link
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      value={editSteamLink}
+                      onChange={(e) => setEditSteamLink(e.target.value)}
+                      placeholder="https://store.steampowered.com/app/..."
+                      className="flex-1 min-w-0 bg-[#0a0f1d] text-xs text-white placeholder-gray-500 rounded-xl px-3 py-2 border border-cyan-500/30 focus:border-cyan-400 outline-none"
+                    />
+                    <button
+                      type="button"
+                      disabled={isEditSteamFetching}
+                      onClick={() => void handleEditSteamFetch('link')}
+                      className="px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-xs font-orbitron font-bold flex items-center gap-1.5 transition cursor-pointer shrink-0 whitespace-nowrap"
+                    >
+                      <i
+                        className={`fa-solid ${
+                          isEditSteamFetching
+                            ? 'fa-spinner fa-spin'
+                            : 'fa-wand-magic-sparkles'
+                        } text-[11px]`}
+                      ></i>
+                      <span>Fetch</span>
+                    </button>
+                  </div>
+
+                  {editSteamFeedback && (
+                    <div
+                      className={`text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 ${
+                        editSteamFeedback.type === 'error'
+                          ? 'bg-rose-950/60 border border-rose-500/40 text-rose-200'
+                          : editSteamFeedback.type === 'success'
+                          ? 'bg-emerald-950/60 border border-emerald-500/40 text-emerald-200'
+                          : 'bg-cyan-950/60 border border-cyan-500/40 text-cyan-200'
+                      }`}
+                    >
+                      <i
+                        className={`fa-solid ${
+                          editSteamFeedback.type === 'error'
+                            ? 'fa-circle-exclamation'
+                            : editSteamFeedback.type === 'success'
+                            ? 'fa-circle-check'
+                            : 'fa-spinner fa-spin'
+                        } text-[11px] shrink-0`}
+                      ></i>
+                      <span className="leading-snug">{editSteamFeedback.text}</span>
+                    </div>
+                  )}
+                </div>
+
                 <div>
                   <label className="block text-xs font-semibold text-gray-300 mb-1">GAME TITLE *</label>
-                  <input
-                    type="text"
-                    required
-                    value={formName}
-                    onChange={(e) => setFormName(e.target.value)}
-                    className="w-full bg-[#131b2e] text-sm text-gray-200 rounded-xl px-3.5 py-2 border border-purple-900/50 outline-none focus:border-purple-500"
-                  />
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      required
+                      value={formName}
+                      onChange={(e) => setFormName(e.target.value)}
+                      className="flex-1 min-w-0 bg-[#131b2e] text-sm text-gray-200 rounded-xl px-3.5 py-2 border border-purple-900/50 outline-none focus:border-purple-500"
+                    />
+                    <button
+                      type="button"
+                      disabled={isEditSteamFetching || !formName.trim()}
+                      onClick={() => void handleEditSteamFetch('name')}
+                      className="px-3 py-2 rounded-xl bg-purple-900/60 hover:bg-purple-800/80 disabled:opacity-45 text-purple-200 border border-purple-500/35 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0 whitespace-nowrap"
+                      title="Optional manual search on Steam by title"
+                    >
+                      <i className="fa-solid fa-magnifying-glass text-[11px]"></i>
+                      <span>Find</span>
+                    </button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-3">
@@ -1000,10 +1193,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <label className="block text-xs font-semibold text-gray-300 mb-1">CATEGORY / TAG *</label>
                     <select
                       value={formTag}
-                      onChange={(e) => setFormTag(e.target.value)}
+                      onChange={(e) => {
+                        const nextTag = e.target.value;
+                        setFormTag(nextTag);
+                        if (nextTag === 'Product' && (!formGenre.trim() || formGenre === 'Action RPG')) {
+                          setFormGenre('Hardware');
+                        } else if (
+                          (nextTag === 'Steam Offline' ||
+                            nextTag === 'Steam Online' ||
+                            nextTag === 'Gameថែមពេលទិញ External') &&
+                          (!formGenre.trim() || formGenre === 'Hardware' || formGenre === 'Gaming Device')
+                        ) {
+                          setFormGenre('Action RPG');
+                        }
+                      }}
                       className="w-full bg-[#131b2e] text-xs text-gray-200 rounded-xl px-3 py-2 border border-purple-900/50 outline-none"
                     >
                       <option value="Steam Offline">Steam Offline</option>
+                      <option value="Steam Online">Steam Online</option>
                       <option value="Product">Product (ទំនិញ / រូបវន្ត)</option>
                       <option value="Account">Account (គណនី)</option>
                       <option value="Gameថែមពេលទិញ External">Gameថែមពេលទិញ External</option>
@@ -1012,16 +1219,80 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-gray-300 mb-1">GENRE *</label>
-                    <input
-                      type="text"
-                      required
-                      value={formGenre}
-                      onChange={(e) => setFormGenre(e.target.value)}
-                      className="w-full bg-[#131b2e] text-xs text-gray-200 rounded-xl px-3 py-2 border border-purple-900/50 outline-none"
-                    />
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-semibold text-gray-300">GENRE / TYPE *</label>
+                      {editSteamGenres.length > 0 && (
+                        <span className="text-[10px] text-cyan-400 font-medium">
+                          Steam Linked
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        required
+                        value={formGenre}
+                        onChange={(e) => setFormGenre(e.target.value)}
+                        className="flex-1 min-w-0 bg-[#131b2e] text-xs text-gray-200 rounded-xl px-3 py-2 border border-purple-900/50 focus:border-cyan-400 outline-none"
+                      />
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          if (e.target.value) setFormGenre(e.target.value);
+                        }}
+                        className="bg-[#131b2e] text-[11px] text-gray-300 rounded-xl px-2 border border-purple-900/50 outline-none cursor-pointer"
+                      >
+                        <option value="">Pick</option>
+                        <option value="Action RPG">Action RPG</option>
+                        <option value="Action Adventure">Action Adventure</option>
+                        <option value="Open World">Open World</option>
+                        <option value="FPS / Shooter">FPS / Shooter</option>
+                        <option value="Survival Horror">Survival Horror</option>
+                        <option value="Simulation">Simulation</option>
+                        <option value="Strategy">Strategy</option>
+                        <option value="Racing Sim">Racing Sim</option>
+                        <option value="Sports">Sports</option>
+                        <option value="Fighting">Fighting</option>
+                        <option value="Indie">Indie</option>
+                        <option value="Hardware">Hardware</option>
+                        <option value="Gaming Device">Gaming Device</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
+
+                {editSteamGenres.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 -mt-1">
+                    <span className="text-[10px] text-gray-400">Steam Genres:</span>
+                    {editSteamGenres.map((sg) => (
+                      <button
+                        key={sg}
+                        type="button"
+                        onClick={() => setFormGenre(sg)}
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border transition cursor-pointer ${
+                          formGenre.toLowerCase() === sg.toLowerCase()
+                            ? 'bg-cyan-600/35 text-cyan-200 border-cyan-400'
+                            : 'bg-[#131b2e] text-gray-300 border-purple-500/25 hover:border-cyan-400/60 hover:text-white'
+                        }`}
+                      >
+                        {sg}
+                      </button>
+                    ))}
+                    {editSteamGenres.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setFormGenre(editSteamGenres.join(', '))}
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border transition cursor-pointer ${
+                          formGenre.toLowerCase() === editSteamGenres.join(', ').toLowerCase()
+                            ? 'bg-purple-600/40 text-purple-200 border-purple-400'
+                            : 'bg-[#131b2e] text-purple-300 border-purple-500/25 hover:border-purple-400'
+                        }`}
+                      >
+                        All ({editSteamGenres.join(', ')})
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
@@ -1122,9 +1393,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <input
                     type="url"
                     value={formLink}
-                    onChange={(e) => setFormLink(e.target.value)}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFormLink(val);
+                      if (extractSteamAppId(val)) {
+                        setEditSteamLink(val);
+                      }
+                    }}
                     placeholder="https://..."
-                    className="w-full bg-[#131b2e] text-xs text-gray-200 rounded-xl px-3 py-2 border border-purple-900/50 outline-none"
+                    className="w-full bg-[#131b2e] text-xs text-gray-200 rounded-xl px-3 py-2 border border-purple-900/50 focus:border-cyan-400 outline-none"
                   />
                 </div>
 
@@ -1202,6 +1479,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                 <div>
                   <label className="block text-xs font-semibold text-gray-300 mb-1">
+                    COVER MAIN TITLE (Large display title on Hero Cover)
+                  </label>
+                  <input
+                    type="text"
+                    value={localSettings.heroMainTitle ?? 'KANI GAME'}
+                    onChange={(e) =>
+                      setLocalSettings({ ...localSettings, heroMainTitle: e.target.value })
+                    }
+                    placeholder="KANI GAME"
+                    className="w-full bg-[#131b2e] text-xs font-orbitron font-bold text-white rounded-xl px-4 py-2.5 border border-purple-900/50 outline-none focus:border-purple-500"
+                  />
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    Main glowing title displayed on the storefront cover (default: KANI GAME). The last word gets the neon gradient highlight.
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-300 mb-1">
                     HERO BANNER TITLE
                   </label>
                   <input
@@ -1252,6 +1547,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </button>
                 </div>
               </form>
+            </div>
+
+            {/* HERO COVER MEDIA (PHOTO OR VIDEO) */}
+            <div className="bg-[#0f172a] p-6 sm:p-8 rounded-2xl border border-fuchsia-500/40 shadow-2xl">
+              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-purple-900/40">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-purple-600/30 to-cyan-500/30 border border-fuchsia-400/40 flex items-center justify-center text-fuchsia-300">
+                  <i className="fa-solid fa-photo-film text-xl"></i>
+                </div>
+                <div>
+                  <h3 className="font-orbitron font-bold text-lg text-white">
+                    HERO COVER PHOTO OR VIDEO
+                  </h3>
+                  <p className="text-xs text-gray-400">
+                    Change the cover artwork photos or add a looping background video (MP4, WebM, or YouTube).
+                  </p>
+                </div>
+              </div>
+
+              <CoverMediaForm
+                settings={localSettings}
+                onSaveSettings={(updated) => {
+                  setLocalSettings(updated);
+                  onSaveSettings(updated);
+                }}
+                onShowToast={onShowToast}
+              />
             </div>
 
             {/* ABA PAY / KHQR / BAKONG PAYMENT QR CODE */}
@@ -1829,6 +2150,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
         </div>
       )}
+
+      {/* PC System Requirements Inspector Modal */}
+      <GameModal
+        game={specInspectGame}
+        isSelected={false}
+        onToggleSelect={() => {
+          if (specInspectGame) {
+            toggleSelectGame(specInspectGame.id);
+          }
+        }}
+        onClose={() => setSpecInspectGame(null)}
+        adminHandle={settings.telegramAdminHandle}
+      />
     </div>
   );
 };

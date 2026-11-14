@@ -19,24 +19,30 @@ export const GameCard: React.FC<GameCardProps> = ({
   const [imgError, setImgError] = useState(false);
 
   const lowerTag = game.tag.toLowerCase();
-  const isSteam = lowerTag.includes('steam');
+  const isSteamOnline = lowerTag.includes('steam') && lowerTag.includes('online');
+  const isSteam = lowerTag.includes('steam') && !lowerTag.includes('online');
   const isProduct = lowerTag.includes('product');
 
-  const categoryLabel = isSteam
+  const categoryLabel = isSteamOnline
+    ? 'Steam Online'
+    : isSteam
     ? 'Steam Offline'
     : isProduct
     ? 'Product'
     : 'Free Gift';
 
-  const typeIconClass = isSteam
-    ? 'fa-brands fa-steam'
-    : isProduct
-    ? 'fa-solid fa-box-open'
-    : 'fa-solid fa-gift';
+  const typeIconClass =
+    isSteam || isSteamOnline
+      ? 'fa-brands fa-steam'
+      : isProduct
+      ? 'fa-solid fa-box-open'
+      : 'fa-solid fa-gift';
 
   // Harmonized Neon Theme Tokens matching image_e9c28aaf.png & HeroBanner
   const frameGradient = isSelected
     ? 'from-fuchsia-500 via-purple-500 to-cyan-400'
+    : isSteamOnline
+    ? 'from-emerald-400/85 via-teal-500/85 to-cyan-500/85'
     : isSteam
     ? 'from-purple-500/80 via-fuchsia-500/85 to-purple-700/85'
     : isProduct
@@ -45,6 +51,8 @@ export const GameCard: React.FC<GameCardProps> = ({
 
   const topTabColor = isSelected
     ? 'bg-gradient-to-r from-fuchsia-400 via-purple-400 to-cyan-300 shadow-[0_2px_14px_rgba(217,70,239,0.8)]'
+    : isSteamOnline
+    ? 'bg-emerald-400 shadow-[0_2px_12px_rgba(52,211,153,0.65)]'
     : isSteam
     ? 'bg-fuchsia-500 shadow-[0_2px_12px_rgba(217,70,239,0.65)]'
     : isProduct
@@ -53,6 +61,8 @@ export const GameCard: React.FC<GameCardProps> = ({
 
   const outerShadow = isSelected
     ? 'shadow-[0_0_24px_rgba(217,70,239,0.55)]'
+    : isSteamOnline
+    ? 'shadow-[0_10px_24px_rgba(8,5,20,0.85)] group-hover:shadow-[0_12px_28px_rgba(52,211,153,0.38)]'
     : isSteam
     ? 'shadow-[0_10px_24px_rgba(8,5,20,0.85)] group-hover:shadow-[0_12px_28px_rgba(217,70,239,0.38)]'
     : isProduct
@@ -63,7 +73,7 @@ export const GameCard: React.FC<GameCardProps> = ({
 
   return (
     <div
-      onClick={() => onToggleSelect(game)}
+      onClick={() => onOpenPreview(game)}
       className="group relative aspect-[3/4.25] cursor-pointer transition-transform duration-200 hover:-translate-y-1.5 select-none"
     >
       {/* Neon Outer Rim Wrapper */}
@@ -102,7 +112,7 @@ export const GameCard: React.FC<GameCardProps> = ({
               </div>
             </div>
 
-            {/* Top-Right Circular Toggle Icon (Bookmark / Check) */}
+            {/* Top-Right Circular Bookmark Toggle Dedicated to List Selection */}
             <button
               type="button"
               onClick={(e) => {
@@ -165,10 +175,6 @@ export const GameCard: React.FC<GameCardProps> = ({
             {/* Measured Bottom Scrim + Title + Action Bar */}
             <div className="absolute inset-x-0 bottom-0 pt-10 pb-2 px-2 bg-gradient-to-t from-[#080513] via-[#0c071b]/90 to-transparent flex flex-col gap-1.5">
               <h4
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onOpenPreview(game);
-                }}
                 title={game.name}
                 className="font-g2a-display font-bold text-white group-hover:text-cyan-300 text-sm sm:text-[15px] leading-tight tracking-wide line-clamp-2 drop-shadow-[0_2px_6px_rgba(0,0,0,0.95)] transition-colors"
               >
@@ -197,16 +203,6 @@ export const GameCard: React.FC<GameCardProps> = ({
                   <span className="truncate">{isSelected ? 'បានជ្រើស' : 'ជ្រើសរើស'}</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => onOpenPreview(game)}
-                  className="w-7 h-7 shrink-0 rounded-md bg-[#16102d]/95 hover:bg-[#251b4a] text-purple-200 hover:text-white border border-purple-500/35 flex items-center justify-center transition-colors cursor-pointer"
-                  title="Preview Details"
-                  aria-label={`Preview ${game.name}`}
-                >
-                  <i className="fa-solid fa-eye text-[10px]"></i>
-                </button>
-
                 {onSendToTelegram && (
                   <button
                     type="button"
@@ -218,6 +214,19 @@ export const GameCard: React.FC<GameCardProps> = ({
                     <i className="fa-brands fa-telegram text-[10px]"></i>
                   </button>
                 )}
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenPreview(game);
+                  }}
+                  className="w-7 h-7 shrink-0 rounded-md bg-[#16102d]/95 hover:bg-cyan-950/90 text-cyan-300 hover:text-white border border-cyan-500/35 hover:border-cyan-400 flex items-center justify-center transition-colors cursor-pointer"
+                  title="PC System Requirements (Steam Spec)"
+                  aria-label={`View PC System Requirements for ${game.name}`}
+                >
+                  <i className="fa-solid fa-microchip text-[10px]"></i>
+                </button>
               </div>
             </div>
           </div>

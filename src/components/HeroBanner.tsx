@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { SiteSettings } from '../types/game';
+import { DEFAULT_COVER_IMAGE, extractYouTubeVideoId } from './CoverMediaModal';
 
 interface HeroBannerProps {
   settings: SiteSettings;
@@ -8,6 +9,8 @@ interface HeroBannerProps {
   totalCount: number;
   onOpenTelegram: () => void;
   onBrowseCatalog?: () => void;
+  canEditCover?: boolean;
+  onEditCover?: () => void;
 }
 
 export const HeroBanner: React.FC<HeroBannerProps> = ({
@@ -17,10 +20,28 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
   totalCount,
   onOpenTelegram,
   onBrowseCatalog,
+  canEditCover = false,
+  onEditCover,
 }) => {
+  const [isVideoMuted, setIsVideoMuted] = useState(true);
+
   const telegramLabel = settings.telegramAdminHandle
     ? `ORDER ${settings.telegramAdminHandle.toUpperCase()}`
     : 'ORDER @KANIGAME168';
+
+  const coverMainTitle = (settings.heroMainTitle ?? 'KANI GAME').trim() || 'KANI GAME';
+  const coverTitleParts = coverMainTitle.split(/\s+/);
+  const coverLeadingTitle = coverTitleParts.length > 1 ? coverTitleParts.slice(0, -1).join(' ') : '';
+  const coverAccentTitle = coverTitleParts.length > 1 ? coverTitleParts[coverTitleParts.length - 1] : coverMainTitle;
+
+  const mediaType = settings.heroMediaType === 'video' && settings.heroCoverVideo ? 'video' : 'photo';
+  const mediaLayout = settings.heroMediaLayout === 'full' ? 'full' : 'side';
+  const leftCoverImg = settings.heroCoverImage?.trim() || DEFAULT_COVER_IMAGE;
+  const rightCoverImg = settings.heroCoverRightImage?.trim() || leftCoverImg;
+  const isDefaultLeftImg = leftCoverImg === DEFAULT_COVER_IMAGE;
+  const isDefaultRightImg = rightCoverImg === DEFAULT_COVER_IMAGE;
+  const coverVideoUrl = settings.heroCoverVideo?.trim() || '';
+  const youtubeId = mediaType === 'video' ? extractYouTubeVideoId(coverVideoUrl) : null;
 
   const handleBrowse = () => {
     if (onBrowseCatalog) {
@@ -59,51 +80,179 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
           className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_#25134e_0%,_#130b2c_52%,_#090716_100%)]"
         />
 
+        {/* Cover Media Background: Video or Photo (Full or Side Panels) */}
+        {mediaType === 'video' ? (
+          mediaLayout === 'full' ? (
+            <div aria-hidden="true" className="absolute inset-0 overflow-hidden pointer-events-none">
+              {youtubeId ? (
+                <iframe
+                  src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=${
+                    isVideoMuted ? 1 : 0
+                  }&loop=1&playlist=${youtubeId}&controls=0&showinfo=0&rel=0&modestbranding=1&playsinline=1`}
+                  title="Cover Background Video"
+                  className="absolute inset-0 w-full h-full scale-[1.25] object-cover opacity-65"
+                  allow="autoplay; encrypted-media"
+                />
+              ) : (
+                <video
+                  key={coverVideoUrl}
+                  src={coverVideoUrl}
+                  autoPlay
+                  loop
+                  muted={isVideoMuted}
+                  playsInline
+                  className="w-full h-full object-cover opacity-70"
+                />
+              )}
+              <div className="absolute inset-0 bg-gradient-to-b from-[#090716]/60 via-[#0c0820]/50 to-[#090716]/75" />
+            </div>
+          ) : (
+            <>
+              <div
+                aria-hidden="true"
+                className="hidden md:block absolute inset-y-0 left-0 w-[28%] lg:w-[25%] max-w-[400px] overflow-hidden pointer-events-none"
+              >
+                {youtubeId ? (
+                  <iframe
+                    src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=1&loop=1&playlist=${youtubeId}&controls=0&rel=0&playsinline=1`}
+                    title="Left Cover Video"
+                    className="w-full h-full scale-150 opacity-85"
+                    allow="autoplay; encrypted-media"
+                  />
+                ) : (
+                  <video
+                    key={`left-${coverVideoUrl}`}
+                    src={coverVideoUrl}
+                    autoPlay
+                    loop
+                    muted={isVideoMuted}
+                    playsInline
+                    className="w-full h-full object-cover opacity-85"
+                  />
+                )}
+                <div className="absolute inset-0 bg-gradient-to-r from-[#090716]/30 via-transparent to-[#140b2e]" />
+                <div className="absolute inset-y-0 right-0 w-24 bg-gradient-to-l from-[#140b2e] via-[#140b2e]/85 to-transparent" />
+              </div>
+              <div
+                aria-hidden="true"
+                className="hidden md:block absolute inset-y-0 right-0 w-[28%] lg:w-[25%] max-w-[400px] overflow-hidden pointer-events-none"
+              >
+                {youtubeId ? (
+                  <iframe
+                    src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=1&loop=1&playlist=${youtubeId}&controls=0&rel=0&playsinline=1`}
+                    title="Right Cover Video"
+                    className="w-full h-full scale-150 opacity-85"
+                    allow="autoplay; encrypted-media"
+                  />
+                ) : (
+                  <video
+                    key={`right-${coverVideoUrl}`}
+                    src={coverVideoUrl}
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                    className="w-full h-full object-cover opacity-85"
+                  />
+                )}
+                <div className="absolute inset-0 bg-gradient-to-l from-[#090716]/30 via-transparent to-[#140b2e]" />
+                <div className="absolute inset-y-0 left-0 w-24 bg-gradient-to-r from-[#140b2e] via-[#140b2e]/85 to-transparent" />
+              </div>
+            </>
+          )
+        ) : mediaLayout === 'full' ? (
+          <div aria-hidden="true" className="absolute inset-0 overflow-hidden pointer-events-none">
+            <img
+              src={leftCoverImg}
+              alt=""
+              referrerPolicy="no-referrer"
+              className="w-full h-full object-cover object-center opacity-55"
+            />
+            <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(12,8,32,0.58)_0%,_rgba(9,7,22,0.82)_100%)]" />
+          </div>
+        ) : (
+          <>
+            {/* Left Character Artwork Panel */}
+            <div
+              aria-hidden="true"
+              className="hidden md:block absolute inset-y-0 left-0 w-[28%] lg:w-[25%] max-w-[400px] overflow-hidden pointer-events-none"
+            >
+              <img
+                src={leftCoverImg}
+                alt=""
+                referrerPolicy="no-referrer"
+                className={
+                  isDefaultLeftImg
+                    ? 'absolute -top-[12%] -left-10 h-[128%] w-auto max-w-none object-cover opacity-85'
+                    : 'w-full h-full object-cover object-center opacity-85'
+                }
+              />
+              <div className="absolute inset-0 bg-gradient-to-r from-[#090716]/30 via-transparent to-[#140b2e]" />
+              <div className="absolute inset-y-0 right-0 w-24 bg-gradient-to-l from-[#140b2e] via-[#140b2e]/85 to-transparent" />
+              <div className="absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-[#0c0820] to-transparent" />
+              <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[#0c0820] to-transparent" />
+            </div>
+
+            {/* Right Character Artwork Panel */}
+            <div
+              aria-hidden="true"
+              className="hidden md:block absolute inset-y-0 right-0 w-[28%] lg:w-[25%] max-w-[400px] overflow-hidden pointer-events-none"
+            >
+              <img
+                src={rightCoverImg}
+                alt=""
+                referrerPolicy="no-referrer"
+                className={
+                  isDefaultRightImg
+                    ? 'absolute -top-[12%] -right-10 h-[128%] w-auto max-w-none object-cover opacity-85'
+                    : 'w-full h-full object-cover object-center opacity-85'
+                }
+              />
+              <div className="absolute inset-0 bg-gradient-to-l from-[#090716]/30 via-transparent to-[#140b2e]" />
+              <div className="absolute inset-y-0 left-0 w-24 bg-gradient-to-r from-[#140b2e] via-[#140b2e]/85 to-transparent" />
+              <div className="absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-[#0c0820] to-transparent" />
+              <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[#0c0820] to-transparent" />
+            </div>
+          </>
+        )}
+
         {/* Subtle Center Ambient Glows */}
         <div
           aria-hidden="true"
           className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[58%] bg-[radial-gradient(circle_at_center,_rgba(168,85,247,0.18)_0%,_rgba(56,189,248,0.06)_55%,_transparent_75%)] pointer-events-none"
         />
 
-        {/* Left Character Artwork Panel (Cyberpunk Sniper) */}
-        <div
-          aria-hidden="true"
-          className="hidden md:block absolute inset-y-0 left-0 w-[28%] lg:w-[25%] max-w-[400px] overflow-hidden pointer-events-none"
-        >
-          <img
-            src="/assets/aistudio/image_81ca6681.png"
-            alt=""
-            referrerPolicy="no-referrer"
-            className="absolute -top-[12%] -left-10 h-[128%] w-auto max-w-none object-cover opacity-85"
-          />
-          <div className="absolute inset-0 bg-gradient-to-r from-[#090716]/30 via-transparent to-[#140b2e]" />
-          <div className="absolute inset-y-0 right-0 w-24 bg-gradient-to-l from-[#140b2e] via-[#140b2e]/85 to-transparent" />
-          <div className="absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-[#0c0820] to-transparent" />
-          <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[#0c0820] to-transparent" />
-        </div>
-
-        {/* Right Character Artwork Panel (Tactical Soldier) */}
-        <div
-          aria-hidden="true"
-          className="hidden md:block absolute inset-y-0 right-0 w-[28%] lg:w-[25%] max-w-[400px] overflow-hidden pointer-events-none"
-        >
-          <img
-            src="/assets/aistudio/image_81ca6681.png"
-            alt=""
-            referrerPolicy="no-referrer"
-            className="absolute -top-[12%] -right-10 h-[128%] w-auto max-w-none object-cover opacity-85"
-          />
-          <div className="absolute inset-0 bg-gradient-to-l from-[#090716]/30 via-transparent to-[#140b2e]" />
-          <div className="absolute inset-y-0 left-0 w-24 bg-gradient-to-r from-[#140b2e] via-[#140b2e]/85 to-transparent" />
-          <div className="absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-[#0c0820] to-transparent" />
-          <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[#0c0820] to-transparent" />
-        </div>
-
         {/* Central Protective Contrast Scrim */}
         <div
           aria-hidden="true"
           className="hidden md:block absolute inset-y-0 left-[18%] right-[18%] bg-gradient-to-r from-transparent via-[#170d36]/80 to-transparent pointer-events-none"
         />
+
+        {/* Admin Quick Button on Cover: Change Photo / Add Video */}
+        {canEditCover && onEditCover && (
+          <button
+            type="button"
+            onClick={onEditCover}
+            className="absolute top-3 right-5 z-30 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-orbitron font-bold text-cyan-200 bg-[#0d1324]/85 hover:bg-purple-900/90 border border-cyan-400/50 hover:border-fuchsia-400 shadow-lg backdrop-blur-md transition cursor-pointer"
+            title="Change Cover Photo or Video"
+          >
+            <i className="fa-solid fa-photo-film text-cyan-300"></i>
+            <span>Change Photo / Video</span>
+          </button>
+        )}
+
+        {/* Sound Toggle for Direct Video Cover */}
+        {mediaType === 'video' && !youtubeId && (
+          <button
+            type="button"
+            onClick={() => setIsVideoMuted((prev) => !prev)}
+            className="absolute bottom-3 right-5 z-30 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-rajdhani font-bold text-gray-200 bg-[#0d1324]/80 hover:bg-purple-900/80 border border-purple-500/40 backdrop-blur-md transition cursor-pointer"
+            title={isVideoMuted ? 'Unmute Cover Video' : 'Mute Cover Video'}
+          >
+            <i className={`fa-solid ${isVideoMuted ? 'fa-volume-xmark text-gray-400' : 'fa-volume-high text-cyan-300'}`}></i>
+            <span>{isVideoMuted ? 'Muted' : 'Sound On'}</span>
+          </button>
+        )}
 
         {/* Neon Chamfered Frame SVG Border */}
         <svg
@@ -142,10 +291,10 @@ export const HeroBanner: React.FC<HeroBannerProps> = ({
           </div>
 
           {/* Brand Display Title */}
-          <h2 className="font-orbitron font-black text-3xl sm:text-4xl md:text-5xl tracking-[0.22em] leading-none mb-3 drop-shadow-[0_4px_20px_rgba(168,85,247,0.35)]">
-            <span className="text-white">KANI</span>{' '}
+          <h2 className="font-orbitron font-black text-3xl sm:text-4xl md:text-5xl tracking-[0.22em] leading-none mb-3 drop-shadow-[0_4px_20px_rgba(168,85,247,0.35)] text-balance">
+            {coverLeadingTitle && <span className="text-white">{coverLeadingTitle} </span>}
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-fuchsia-400 to-cyan-300">
-              GAME
+              {coverAccentTitle}
             </span>
           </h2>
 

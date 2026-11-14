@@ -13,7 +13,7 @@ export interface Game {
   costPrice?: number; // Cost price for profit margins
 }
 
-export type GameTab = 'steam' | 'free' | 'product' | 'all';
+export type GameTab = 'steam' | 'steam-online' | 'free' | 'product' | 'all';
 
 export type AppViewMode = 'store' | 'pos' | 'admin';
 
@@ -121,9 +121,15 @@ export interface CoverCard {
 export interface SiteSettings {
   portalTitle: string;
   portalSubtitle: string;
+  heroMainTitle?: string;
   heroBadge: string;
   heroTitle: string;
   heroDescription: string;
+  heroMediaType?: 'photo' | 'video';
+  heroMediaLayout?: 'side' | 'full';
+  heroCoverImage?: string;
+  heroCoverRightImage?: string;
+  heroCoverVideo?: string;
   telegramAdminHandle: string;
   telegramNotePlaceholder: string;
   customMessagePrefix?: string;

@@ -16,6 +16,7 @@ import { AdminLoginModal } from './components/AdminLoginModal';
 import { AdminDashboard } from './components/AdminDashboard';
 import { POSTerminal } from './components/POSTerminal';
 import { ToastContainer, ToastMessage } from './components/Toast';
+import { CoverMediaModal } from './components/CoverMediaModal';
 
 const getTabFromUrl = (): GameTab => {
   if (typeof window === 'undefined') return 'steam';
@@ -23,6 +24,15 @@ const getTabFromUrl = (): GameTab => {
   const searchParams = new URLSearchParams(window.location.search);
   const tabParam = searchParams.get('tab')?.toLowerCase();
   const pathname = window.location.pathname.toLowerCase();
+
+  if (
+    hash === '#steam-online' ||
+    hash.includes('steam-online') ||
+    tabParam === 'steam-online' ||
+    pathname.endsWith('/steam-online')
+  ) {
+    return 'steam-online';
+  }
 
   if (
     hash === '#product' ||
@@ -94,6 +104,7 @@ export default function App() {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isAdminView, setIsAdminView] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
+  const [isCoverMediaModalOpen, setIsCoverMediaModalOpen] = useState(false);
   const [loginTarget, setLoginTarget] = useState<'admin' | 'pos'>('admin');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(() =>
@@ -179,7 +190,18 @@ export default function App() {
     }
 
     if (!window.location.hash) {
-      const expectedHash = initialAdmin && authenticated ? '#admin' : initialPos && authenticated ? '#pos' : initialTab === 'steam' ? '#steam' : '#external';
+      const expectedHash =
+        initialAdmin && authenticated
+          ? '#admin'
+          : initialPos && authenticated
+          ? '#pos'
+          : initialTab === 'steam'
+          ? '#steam'
+          : initialTab === 'steam-online'
+          ? '#steam-online'
+          : initialTab === 'product'
+          ? '#product'
+          : '#external';
       window.history.replaceState(null, '', expectedHash);
     }
 
@@ -272,12 +294,21 @@ export default function App() {
     };
   }, []);
 
+  const getHashForTab = (tab: GameTab) =>
+    tab === 'steam'
+      ? '#steam'
+      : tab === 'steam-online'
+      ? '#steam-online'
+      : tab === 'product'
+      ? '#product'
+      : '#external';
+
   const handleTabChange = (tab: GameTab) => {
     setIsPosView(false);
     setIsAdminView(false);
     setActiveTab(tab);
     setGenreFilter('all');
-    const targetHash = tab === 'steam' ? '#steam' : tab === 'product' ? '#product' : '#external';
+    const targetHash = getHashForTab(tab);
     if (window.location.hash !== targetHash) {
       window.location.hash = targetHash;
     }
@@ -292,7 +323,7 @@ export default function App() {
     }
     if (isPosView) {
       setIsPosView(false);
-      const targetHash = activeTab === 'steam' ? '#steam' : activeTab === 'product' ? '#product' : '#external';
+      const targetHash = getHashForTab(activeTab);
       if (window.location.hash !== targetHash) {
         window.location.hash = targetHash;
       }
@@ -320,7 +351,7 @@ export default function App() {
     }
     if (isAdminView) {
       setIsAdminView(false);
-      const targetHash = activeTab === 'steam' ? '#steam' : activeTab === 'product' ? '#product' : '#external';
+      const targetHash = getHashForTab(activeTab);
       if (window.location.hash !== targetHash) {
         window.location.hash = targetHash;
       }
@@ -389,7 +420,19 @@ export default function App() {
 
   // Counts
   const steamGames = useMemo(
-    () => games.filter((g) => g.tag.toLowerCase().includes('steam')),
+    () =>
+      games.filter((g) => {
+        const lower = g.tag.toLowerCase();
+        return lower.includes('steam') && !lower.includes('online');
+      }),
+    [games]
+  );
+  const steamOnlineGames = useMemo(
+    () =>
+      games.filter((g) => {
+        const lower = g.tag.toLowerCase();
+        return lower.includes('steam') && lower.includes('online');
+      }),
     [games]
   );
   const productGames = useMemo(
@@ -397,23 +440,41 @@ export default function App() {
     [games]
   );
   const freeGames = useMemo(
-    () => games.filter((g) => !g.tag.toLowerCase().includes('steam') && !g.tag.toLowerCase().includes('product')),
+    () =>
+      games.filter((g) => {
+        const lower = g.tag.toLowerCase();
+        return !lower.includes('steam') && !lower.includes('product');
+      }),
     [games]
   );
 
   // Extract unique genres for active tab
   const availableGenres = useMemo(() => {
-    const currentList = activeTab === 'steam' ? steamGames : activeTab === 'product' ? productGames : freeGames;
+    const currentList =
+      activeTab === 'steam'
+        ? steamGames
+        : activeTab === 'steam-online'
+        ? steamOnlineGames
+        : activeTab === 'product'
+        ? productGames
+        : freeGames;
     const genres = new Set<string>();
     currentList.forEach((g) => {
       if (g.genre) genres.add(g.genre.trim());
     });
     return Array.from(genres).sort();
-  }, [activeTab, steamGames, freeGames, productGames]);
+  }, [activeTab, steamGames, steamOnlineGames, freeGames, productGames]);
 
   // Filtered & Sorted Games for storefront
   const displayedGames = useMemo(() => {
-    let list = activeTab === 'steam' ? [...steamGames] : activeTab === 'product' ? [...productGames] : [...freeGames];
+    let list =
+      activeTab === 'steam'
+        ? [...steamGames]
+        : activeTab === 'steam-online'
+        ? [...steamOnlineGames]
+        : activeTab === 'product'
+        ? [...productGames]
+        : [...freeGames];
 
     // Search filter
     if (searchTerm.trim()) {
@@ -439,7 +500,7 @@ export default function App() {
     }
 
     return list;
-  }, [activeTab, steamGames, freeGames, productGames, searchTerm, genreFilter, sortBy]);
+  }, [activeTab, steamGames, steamOnlineGames, freeGames, productGames, searchTerm, genreFilter, sortBy]);
 
   // Game Selection handlers
   const toggleSelectGame = (game: Game) => {
@@ -677,6 +738,7 @@ export default function App() {
         onTabChange={handleTabChange}
         onClearSearch={() => setSearchTerm('')}
         steamCount={steamGames.length}
+        steamOnlineCount={steamOnlineGames.length}
         freeCount={freeGames.length}
         productCount={productGames.length}
         isAdminView={isAdminView}
@@ -710,7 +772,7 @@ export default function App() {
           onLogout={handleAdminLogout}
           onCloseAdmin={() => {
             setIsAdminView(false);
-            const targetHash = activeTab === 'steam' ? '#steam' : activeTab === 'product' ? '#product' : '#external';
+            const targetHash = getHashForTab(activeTab);
             if (window.location.hash !== targetHash) {
               window.location.hash = targetHash;
             }
@@ -733,7 +795,7 @@ export default function App() {
           onDeleteProduct={handleDeleteGame}
           onSwitchToStore={() => {
             setIsPosView(false);
-            window.location.hash = activeTab === 'steam' ? '#steam' : activeTab === 'product' ? '#product' : '#external';
+            window.location.hash = getHashForTab(activeTab);
           }}
           onSwitchToAdmin={() => {
             const role = StorageService.getCurrentUserRole();
@@ -761,6 +823,8 @@ export default function App() {
             steamCount={steamGames.length}
             freeCount={freeGames.length}
             totalCount={games.length}
+            canEditCover={isLoggedIn && currentUserRole !== 'pos'}
+            onEditCover={() => setIsCoverMediaModalOpen(true)}
             onOpenTelegram={() => {
               const handle = settings.telegramAdminHandle.replace('@', '');
               window.open(`https://t.me/${handle}`, '_blank');
@@ -785,10 +849,15 @@ export default function App() {
                     <i className="fa-brands fa-steam text-purple-400 text-2xl"></i>
                     <span>Steam Offline Games</span>
                   </>
+                ) : activeTab === 'steam-online' ? (
+                  <>
+                    <i className="fa-brands fa-steam text-emerald-400 text-2xl"></i>
+                    <span>Steam Online Games</span>
+                  </>
                 ) : activeTab === 'product' ? (
                   <>
                     <i className="fa-solid fa-box-open text-sky-400 text-2xl"></i>
-                    <span>Gaming Products & Accessories (ទំនិញ)</span>
+                    <span>Gaming Products &amp; Accessories (ទំនិញ)</span>
                   </>
                 ) : (
                   <>
@@ -800,6 +869,8 @@ export default function App() {
               <p className="text-xs text-gray-400 mt-1">
                 {activeTab === 'steam'
                   ? 'ចុចប៊ូតុង Checkbox ឬ Select ដើម្បីជ្រើសរើស Game ច្រើនក្នុងពេលតែមួយ'
+                  : activeTab === 'steam-online'
+                  ? 'បញ្ជី Steam Online Games & Accounts សម្រាប់លេង Online Multiplayer'
                   : activeTab === 'product'
                   ? 'ទំនិញគ្រឿងបន្លាស់ ឧបករណ៍ហ្គេម External HDD និង Accessories គុណភាពខ្ពស់'
                   : 'បញ្ជី Game ឥតគិតថ្លៃសម្រាប់ទាញយក ឬ Request តាម Telegram'}
@@ -1027,6 +1098,11 @@ export default function App() {
         onClose={() => setPreviewGame(null)}
         adminHandle={settings.telegramAdminHandle}
         onSendToTelegram={handleSendSingleGameToTelegram}
+        onSelectGenre={(genreName) => {
+          setGenreFilter(genreName);
+          const el = document.getElementById('catalog-section');
+          if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }}
       />
 
       {/* Admin & POS Login Modal */}
@@ -1036,6 +1112,15 @@ export default function App() {
         onLogin={handleAdminLogin}
         onLoginSuccess={handleAdminLoginSuccess}
         targetDestination={loginTarget}
+      />
+
+      {/* Cover Photo / Video Editor Modal */}
+      <CoverMediaModal
+        isOpen={isCoverMediaModalOpen}
+        onClose={() => setIsCoverMediaModalOpen(false)}
+        settings={settings}
+        onSaveSettings={handleSaveSettings}
+        onShowToast={showToast}
       />
     </div>
   );

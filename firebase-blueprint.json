@@ -68,6 +68,15 @@
       "properties": {
         "portalTitle": { "type": "string" },
         "portalSubtitle": { "type": "string" },
+        "heroMainTitle": { "type": "string", "description": "Editable main cover display title on HeroBanner" },
+        "heroBadge": { "type": "string" },
+        "heroTitle": { "type": "string" },
+        "heroDescription": { "type": "string" },
+        "heroMediaType": { "type": "string", "enum": ["photo", "video"], "description": "Cover background media mode" },
+        "heroMediaLayout": { "type": "string", "enum": ["side", "full"], "description": "Cover layout: side artwork panels or full background" },
+        "heroCoverImage": { "type": "string", "description": "Custom cover photo URL or compressed data URL" },
+        "heroCoverRightImage": { "type": "string", "description": "Optional separate right-side cover photo URL" },
+        "heroCoverVideo": { "type": "string", "description": "Custom cover video URL (MP4/WebM/YouTube or /uploads path)" },
         "khrExchangeRate": { "type": "number" },
         "posCashierName": { "type": "string" },
         "coverCards": { "type": "array", "description": "Featured storefront cover promo cards" }

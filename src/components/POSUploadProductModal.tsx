@@ -1,6 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Game } from '../types/game';
 import { compressImageFile } from '../utils/imageUtils';
+import { extractSteamAppId, fetchSteamSpec } from '../services/steamService';
 
 interface POSUploadProductModalProps {
   isOpen: boolean;
@@ -80,11 +81,134 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
   const [isDigital, setIsDigital] = useState(editingProduct?.stock === undefined);
   const [description, setDescription] = useState(editingProduct?.description || '');
   const [link, setLink] = useState(editingProduct?.link || '');
+  const [steamAutoLink, setSteamAutoLink] = useState(
+    editingProduct?.link && extractSteamAppId(editingProduct.link) ? editingProduct.link : ''
+  );
+  const [steamGenres, setSteamGenres] = useState<string[]>([]);
+  const [isSteamFetching, setIsSteamFetching] = useState(false);
+  const [steamFeedback, setSteamFeedback] = useState<{
+    type: 'success' | 'error' | 'info';
+    text: string;
+  } | null>(null);
   const [imgError, setImgError] = useState(false);
   const [isUploadingFile, setIsUploadingFile] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
+  const lastAutoFetchedAppIdRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setName(editingProduct?.name || '');
+    setTag(editingProduct?.tag || 'Steam Offline');
+    setCustomTag('');
+    setGenre(editingProduct?.genre || 'Action RPG');
+    setPrice(
+      editingProduct?.price !== undefined ? editingProduct.price.toString() : '5.00'
+    );
+    setCostPrice(
+      editingProduct?.costPrice !== undefined ? editingProduct.costPrice.toString() : '0'
+    );
+    const initialImg =
+      editingProduct?.img ||
+      'https://images.unsplash.com/photo-1542751371-adc38448a05e?w=600&auto=format&fit=crop&q=80';
+    setImg(initialImg);
+    setUrlInputVal(initialImg.startsWith('http') ? initialImg : '');
+    setBarcode(
+      editingProduct?.barcode || `SKU-${Math.floor(100000 + Math.random() * 900000)}`
+    );
+    setStock(editingProduct?.stock !== undefined ? editingProduct.stock.toString() : '');
+    setIsDigital(editingProduct?.stock === undefined);
+    setDescription(editingProduct?.description || '');
+    const initialLink = editingProduct?.link || '';
+    setLink(initialLink);
+    setSteamAutoLink(extractSteamAppId(initialLink) ? initialLink : '');
+    setSteamGenres([]);
+    lastAutoFetchedAppIdRef.current = extractSteamAppId(initialLink);
+    setSteamFeedback(null);
+    setValidationError(null);
+    setImgError(false);
+  }, [isOpen, editingProduct]);
+
+  const handleFetchFromSteam = useCallback(
+    async (mode: 'link' | 'name', explicitLink?: string) => {
+      const targetLink = (explicitLink !== undefined ? explicitLink : steamAutoLink).trim();
+      const targetName = name.trim();
+
+      if (mode === 'link' && !targetLink) {
+        setSteamFeedback({
+          type: 'error',
+          text: 'Please paste a Steam Store URL or App ID first.',
+        });
+        return;
+      }
+      if (mode === 'name' && !targetName) {
+        setSteamFeedback({
+          type: 'error',
+          text: 'Please enter a game name before clicking Find.',
+        });
+        return;
+      }
+
+      setIsSteamFetching(true);
+      setSteamFeedback({
+        type: 'info',
+        text:
+          mode === 'link'
+            ? 'Fetching exact Steam game details & verified cover...'
+            : `Searching Steam Store for "${targetName}"...`,
+      });
+
+      try {
+        const spec = await fetchSteamSpec(
+          mode === 'link' ? { link: targetLink } : { name: targetName }
+        );
+        lastAutoFetchedAppIdRef.current = spec.appId;
+
+        setName(spec.matchedName);
+        setSteamGenres(Array.isArray(spec.genres) ? spec.genres : []);
+        const resolvedGenre =
+          spec.primaryGenre || (Array.isArray(spec.genres) ? spec.genres[0] || '' : '');
+        if (resolvedGenre) setGenre(resolvedGenre);
+        if (spec.coverImage) {
+          setImg(spec.coverImage);
+          setUrlInputVal(spec.coverImage.startsWith('http') ? spec.coverImage : '');
+          setImgError(false);
+        }
+        setLink(spec.steamUrl);
+        setSteamAutoLink(spec.steamUrl);
+        setValidationError(null);
+        // Strictly do NOT auto-fill or overwrite description
+        setSteamFeedback({
+          type: 'success',
+          text: `Synced "${spec.matchedName}" (App ID: ${spec.appId}) — Cover, Genre & Steam Link filled.`,
+        });
+      } catch (err) {
+        setSteamFeedback({
+          type: 'error',
+          text:
+            err instanceof Error
+              ? err.message
+              : 'Could not fetch details from Steam Store.',
+        });
+      } finally {
+        setIsSteamFetching(false);
+      }
+    },
+    [steamAutoLink, name]
+  );
+
+  // Auto-fetch when a valid Steam link or App ID is pasted/entered into Steam Store Link (Auto)
+  useEffect(() => {
+    if (!isOpen) return;
+    const detectedAppId = extractSteamAppId(steamAutoLink);
+    if (!detectedAppId || detectedAppId === lastAutoFetchedAppIdRef.current) return;
+
+    const timer = window.setTimeout(() => {
+      void handleFetchFromSteam('link', steamAutoLink);
+    }, 280);
+    return () => window.clearTimeout(timer);
+  }, [isOpen, steamAutoLink, handleFetchFromSteam]);
 
   if (!isOpen) return null;
 
@@ -333,19 +457,90 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {/* Left Column: Essential Product Info */}
             <div className="space-y-4">
-              {/* Product Name */}
+              {/* Steam Store Link (Auto-Fill) Above Game Name */}
+              <div className="p-3 rounded-xl bg-gradient-to-br from-[#131c34] to-[#10172b] border border-cyan-500/35 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-xs font-semibold text-cyan-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <i className="fa-brands fa-steam text-sm"></i>
+                    <span>Steam Store Link (Auto)</span>
+                  </label>
+                  <span className="text-[10px] text-gray-400">
+                    Auto-fills Name, Cover, Genre &amp; Link
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={steamAutoLink}
+                    onChange={(e) => setSteamAutoLink(e.target.value)}
+                    placeholder="https://store.steampowered.com/app/..."
+                    className="flex-1 min-w-0 bg-[#0a0f1d] text-xs text-white placeholder-gray-500 rounded-xl px-3 py-2 border border-cyan-500/30 focus:border-cyan-400 outline-none"
+                  />
+                  <button
+                    type="button"
+                    disabled={isSteamFetching}
+                    onClick={() => void handleFetchFromSteam('link')}
+                    className="px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-xs font-orbitron font-bold flex items-center gap-1.5 transition cursor-pointer shrink-0 whitespace-nowrap"
+                  >
+                    <i
+                      className={`fa-solid ${
+                        isSteamFetching ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'
+                      } text-[11px]`}
+                    ></i>
+                    <span>Fetch</span>
+                  </button>
+                </div>
+
+                {steamFeedback && (
+                  <div
+                    className={`text-[11px] px-2.5 py-1.5 rounded-lg flex items-center gap-1.5 ${
+                      steamFeedback.type === 'error'
+                        ? 'bg-rose-950/60 border border-rose-500/40 text-rose-200'
+                        : steamFeedback.type === 'success'
+                        ? 'bg-emerald-950/60 border border-emerald-500/40 text-emerald-200'
+                        : 'bg-cyan-950/60 border border-cyan-500/40 text-cyan-200'
+                    }`}
+                  >
+                    <i
+                      className={`fa-solid ${
+                        steamFeedback.type === 'error'
+                          ? 'fa-circle-exclamation'
+                          : steamFeedback.type === 'success'
+                          ? 'fa-circle-check'
+                          : 'fa-spinner fa-spin'
+                      } text-[11px] shrink-0`}
+                    ></i>
+                    <span className="leading-snug">{steamFeedback.text}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Product Name (No automatic guessing while typing; optional manual Find button) */}
               <div>
                 <label className="block text-xs font-semibold text-gray-300 uppercase tracking-wider mb-1.5">
                   Product / Game Name <span className="text-red-400">*</span>
                 </label>
-                <input
-                  type="text"
-                  required
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g., Black Myth: Wukong, Sekiro, Steam Account..."
-                  className="w-full bg-[#131b2e] text-sm text-white placeholder-gray-500 rounded-xl px-3.5 py-2.5 border border-purple-500/30 focus:border-purple-400 focus:ring-1 focus:ring-purple-400 outline-none"
-                />
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    required
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="e.g., Black Myth: Wukong, Sekiro, Steam Account..."
+                    className="flex-1 min-w-0 bg-[#131b2e] text-sm text-white placeholder-gray-500 rounded-xl px-3.5 py-2.5 border border-purple-500/30 focus:border-purple-400 focus:ring-1 focus:ring-purple-400 outline-none"
+                  />
+                  <button
+                    type="button"
+                    disabled={isSteamFetching || !name.trim()}
+                    onClick={() => void handleFetchFromSteam('name')}
+                    className="px-3 py-2.5 rounded-xl bg-purple-900/60 hover:bg-purple-800/80 disabled:opacity-45 text-purple-200 border border-purple-500/35 text-xs font-semibold flex items-center gap-1.5 transition cursor-pointer shrink-0 whitespace-nowrap"
+                    title="Optional manual search on Steam by title"
+                  >
+                    <i className="fa-solid fa-magnifying-glass text-[11px]"></i>
+                    <span>Find</span>
+                  </button>
+                </div>
               </div>
 
               {/* Tag / Category */}
@@ -353,28 +548,15 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
                 <label className="block text-xs font-semibold text-gray-300 uppercase tracking-wider mb-1.5">
                   Category / Tag <span className="text-red-400">*</span>
                 </label>
-                <div className="grid grid-cols-3 gap-2 mb-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTag('Product');
-                      if (price === '0') setPrice('20.00');
-                    }}
-                    className={`py-2 px-2 rounded-xl text-xs font-bold font-rajdhani border transition flex items-center justify-center gap-1.5 cursor-pointer ${
-                      tag === 'Product'
-                        ? 'bg-sky-600 text-white border-sky-400 shadow-md'
-                        : 'bg-[#131b2e] text-gray-400 border-purple-900/40 hover:text-white'
-                    }`}
-                  >
-                    <i className="fa-solid fa-box text-xs"></i>
-                    <span>Product</span>
-                  </button>
-
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
                   <button
                     type="button"
                     onClick={() => {
                       setTag('Steam Offline');
                       if (price === '0') setPrice('5.00');
+                      if (!genre.trim() || genre === 'Hardware' || genre === 'Gaming Device') {
+                        setGenre('Action RPG');
+                      }
                     }}
                     className={`py-2 px-2 rounded-xl text-xs font-bold font-rajdhani border transition flex items-center justify-center gap-1.5 cursor-pointer ${
                       tag === 'Steam Offline'
@@ -389,8 +571,47 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
                   <button
                     type="button"
                     onClick={() => {
+                      setTag('Steam Online');
+                      if (price === '0') setPrice('10.00');
+                      if (!genre.trim() || genre === 'Hardware' || genre === 'Gaming Device') {
+                        setGenre('Action RPG');
+                      }
+                    }}
+                    className={`py-2 px-2 rounded-xl text-xs font-bold font-rajdhani border transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                      tag === 'Steam Online'
+                        ? 'bg-emerald-600 text-white border-emerald-400 shadow-md'
+                        : 'bg-[#131b2e] text-gray-400 border-purple-900/40 hover:text-white'
+                    }`}
+                  >
+                    <i className="fa-brands fa-steam text-xs"></i>
+                    <span>Steam Online</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTag('Product');
+                      if (price === '0') setPrice('20.00');
+                      if (!genre.trim() || genre === 'Action RPG') setGenre('Hardware');
+                    }}
+                    className={`py-2 px-2 rounded-xl text-xs font-bold font-rajdhani border transition flex items-center justify-center gap-1.5 cursor-pointer ${
+                      tag === 'Product'
+                        ? 'bg-sky-600 text-white border-sky-400 shadow-md'
+                        : 'bg-[#131b2e] text-gray-400 border-purple-900/40 hover:text-white'
+                    }`}
+                  >
+                    <i className="fa-solid fa-box text-xs"></i>
+                    <span>Product</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
                       setTag('Gameថែមពេលទិញ External');
                       setPrice('0');
+                      if (!genre.trim() || genre === 'Hardware' || genre === 'Gaming Device') {
+                        setGenre('Action RPG');
+                      }
                     }}
                     className={`py-2 px-2 rounded-xl text-xs font-bold font-rajdhani border transition flex items-center justify-center gap-1.5 cursor-pointer ${
                       tag === 'Gameថែមពេលទិញ External'
@@ -405,12 +626,22 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
 
                 <div className="flex gap-2">
                   <select
-                    value={tag === 'Product' || tag === 'Steam Offline' || tag === 'Gameថែមពេលទិញ External' ? '' : tag}
+                    value={
+                      tag === 'Product' ||
+                      tag === 'Steam Offline' ||
+                      tag === 'Steam Online' ||
+                      tag === 'Gameថែមពេលទិញ External'
+                        ? ''
+                        : tag
+                    }
                     onChange={(e) => {
-                      if (e.target.value === 'CUSTOM') {
+                      const nextTag = e.target.value;
+                      if (nextTag === 'CUSTOM') {
                         setTag('CUSTOM');
-                      } else if (e.target.value) {
-                        setTag(e.target.value);
+                      } else if (nextTag) {
+                        setTag(nextTag);
+                        if (nextTag === 'Gaming Accessories') setGenre('Hardware');
+                        else if (nextTag === 'Software & Tools') setGenre('Software');
                       }
                     }}
                     className="flex-1 bg-[#131b2e] text-xs text-gray-300 rounded-xl px-3 py-2 border border-purple-900/40 outline-none"
@@ -418,7 +649,7 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
                     <option value="">Other Category Types...</option>
                     <option value="Account">Account (Steam/EA/Xbox)</option>
                     <option value="Gaming Accessories">Gaming Accessories / Gear</option>
-                    <option value="Software & Tools">Software & Utility</option>
+                    <option value="Software & Tools">Software &amp; Utility</option>
                     <option value="CUSTOM">Custom Tag (Type below)...</option>
                   </select>
                 </div>
@@ -436,32 +667,82 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
 
               {/* Genre & Classification */}
               <div>
-                <label className="block text-xs font-semibold text-gray-300 uppercase tracking-wider mb-1.5">
-                  Genre / Type
-                </label>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="block text-xs font-semibold text-gray-300 uppercase tracking-wider">
+                    Genre / Type
+                  </label>
+                  {steamGenres.length > 0 && (
+                    <span className="text-[10px] text-cyan-400 font-medium">
+                      Steam Linked ({steamGenres.length})
+                    </span>
+                  )}
+                </div>
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={genre}
                     onChange={(e) => setGenre(e.target.value)}
                     placeholder="e.g. Hardware, Accessory, Action RPG, FPS"
-                    className="flex-1 bg-[#131b2e] text-sm text-white placeholder-gray-500 rounded-xl px-3.5 py-2 border border-purple-500/30 outline-none"
+                    className="flex-1 min-w-0 bg-[#131b2e] text-sm text-white placeholder-gray-500 rounded-xl px-3.5 py-2 border border-purple-500/30 focus:border-cyan-400 outline-none"
                   />
                   <select
                     onChange={(e) => {
                       if (e.target.value) setGenre(e.target.value);
                     }}
                     value=""
-                    className="bg-[#131b2e] text-xs text-gray-300 rounded-xl px-2 border border-purple-900/40"
+                    className="bg-[#131b2e] text-xs text-gray-300 rounded-xl px-2.5 border border-purple-900/40 outline-none cursor-pointer"
                   >
                     <option value="">Quick Pick</option>
+                    <option value="Action RPG">Action RPG</option>
+                    <option value="Action Adventure">Action Adventure</option>
+                    <option value="Open World">Open World</option>
+                    <option value="FPS / Shooter">FPS / Shooter</option>
+                    <option value="Survival Horror">Survival Horror</option>
+                    <option value="Simulation">Simulation</option>
+                    <option value="Strategy">Strategy</option>
+                    <option value="Racing Sim">Racing Sim</option>
+                    <option value="Sports">Sports</option>
+                    <option value="Fighting">Fighting</option>
+                    <option value="Indie">Indie</option>
                     <option value="Hardware">Hardware / Gear</option>
                     <option value="Gaming Device">Gaming Device</option>
-                    <option value="Action RPG">Action RPG</option>
-                    <option value="Open World">Open World</option>
-                    <option value="Sports">Sports</option>
+                    <option value="Accessory">Accessory</option>
+                    <option value="Software">Software</option>
                   </select>
                 </div>
+
+                {steamGenres.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                    <span className="text-[10px] text-gray-400">Steam Genres:</span>
+                    {steamGenres.map((sg) => (
+                      <button
+                        key={sg}
+                        type="button"
+                        onClick={() => setGenre(sg)}
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border transition cursor-pointer ${
+                          genre.toLowerCase() === sg.toLowerCase()
+                            ? 'bg-cyan-600/35 text-cyan-200 border-cyan-400'
+                            : 'bg-[#131b2e] text-gray-300 border-purple-500/25 hover:border-cyan-400/60 hover:text-white'
+                        }`}
+                      >
+                        {sg}
+                      </button>
+                    ))}
+                    {steamGenres.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setGenre(steamGenres.join(', '))}
+                        className={`px-2 py-0.5 rounded-md text-[10px] font-semibold border transition cursor-pointer ${
+                          genre.toLowerCase() === steamGenres.join(', ').toLowerCase()
+                            ? 'bg-purple-600/40 text-purple-200 border-purple-400'
+                            : 'bg-[#131b2e] text-purple-300 border-purple-500/25 hover:border-purple-400'
+                        }`}
+                      >
+                        All ({steamGenres.join(', ')})
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Price (USD & KHR) & Buy-in Cost */}
@@ -759,9 +1040,15 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
                   <input
                     type="text"
                     value={link}
-                    onChange={(e) => setLink(e.target.value)}
-                    placeholder="Official Store / Telegram Download Link (Optional)"
-                    className="w-full bg-[#131b2e] text-xs text-white placeholder-gray-500 rounded-xl px-3 py-1.5 border border-purple-500/20 outline-none mb-2"
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setLink(val);
+                      if (extractSteamAppId(val)) {
+                        setSteamAutoLink(val);
+                      }
+                    }}
+                    placeholder="Official Store / Steam / Telegram Download Link (Optional)"
+                    className="w-full bg-[#131b2e] text-xs text-white placeholder-gray-500 rounded-xl px-3 py-1.5 border border-purple-500/20 focus:border-cyan-400 outline-none mb-2"
                   />
 
                   <label className="block text-[11px] font-semibold text-gray-300 uppercase mb-1">

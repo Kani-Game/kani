@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  --font-orbitron: "Orbitron", sans-serif;
+  --font-orbitron: "Orbitron", "Kantumruy Pro", sans-serif;
   --font-rajdhani: "Rajdhani", "Kantumruy Pro", sans-serif;
   --font-g2a-display: "Barlow Condensed", "Plus Jakarta Sans", "Kantumruy Pro", sans-serif;
   --font-g2a-body: "Plus Jakarta Sans", "Kantumruy Pro", sans-serif;

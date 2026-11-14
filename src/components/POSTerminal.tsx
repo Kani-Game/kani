@@ -82,12 +82,15 @@ export const POSTerminal: React.FC<POSTerminalProps> = ({
         (g.barcode && g.barcode.toLowerCase().includes(searchTerm.toLowerCase().trim()));
 
       let matchCategory = true;
+      const lowerTag = g.tag.toLowerCase();
       if (selectedCategory === 'steam') {
-        matchCategory = g.tag.toLowerCase().includes('steam');
+        matchCategory = lowerTag.includes('steam') && !lowerTag.includes('online');
+      } else if (selectedCategory === 'steam-online') {
+        matchCategory = lowerTag.includes('steam') && lowerTag.includes('online');
       } else if (selectedCategory === 'product') {
-        matchCategory = g.tag.toLowerCase().includes('product');
+        matchCategory = lowerTag.includes('product');
       } else if (selectedCategory === 'free') {
-        matchCategory = !g.tag.toLowerCase().includes('steam') && !g.tag.toLowerCase().includes('product');
+        matchCategory = !lowerTag.includes('steam') && !lowerTag.includes('product');
       } else if (selectedCategory !== 'all') {
         matchCategory = g.tag === selectedCategory;
       }
@@ -422,6 +425,27 @@ export const POSTerminal: React.FC<POSTerminalProps> = ({
             >
               <i className="fa-brands fa-steam"></i>
               <span>Steam Offline</span>
+            </button>
+
+            <button
+              onClick={() => setSelectedCategory('steam-online')}
+              className={`px-3 py-1.5 rounded-lg font-rajdhani font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1.5 ${
+                selectedCategory === 'steam-online'
+                  ? 'bg-emerald-600 text-white shadow'
+                  : 'bg-[#131b2e] text-emerald-400 hover:text-white border border-emerald-900/40'
+              }`}
+            >
+              <i className="fa-brands fa-steam"></i>
+              <span>
+                Steam Online (
+                {
+                  games.filter((g) => {
+                    const lower = g.tag.toLowerCase();
+                    return lower.includes('steam') && lower.includes('online');
+                  }).length
+                }
+                )
+              </span>
             </button>
 
             <button

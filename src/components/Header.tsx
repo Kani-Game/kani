@@ -6,6 +6,7 @@ interface HeaderProps {
   onTabChange: (tab: GameTab) => void;
   onClearSearch?: () => void;
   steamCount: number;
+  steamOnlineCount?: number;
   freeCount: number;
   productCount?: number;
   isAdminView: boolean;
@@ -23,6 +24,7 @@ export const Header: React.FC<HeaderProps> = ({
   onTabChange,
   onClearSearch,
   steamCount,
+  steamOnlineCount = 0,
   freeCount,
   productCount = 0,
   isAdminView,
@@ -106,7 +108,7 @@ export const Header: React.FC<HeaderProps> = ({
           {!isAdminView && !isPosView ? (
             <nav
               aria-label="Catalog Categories"
-              className="hidden md:flex flex-1 items-center justify-center gap-6 lg:gap-9 min-w-0 lg:flex-none lg:absolute lg:left-1/2 lg:-translate-x-1/2"
+              className="hidden md:flex flex-1 items-center justify-center gap-4 lg:gap-6 min-w-0 xl:flex-none xl:absolute xl:left-1/2 xl:-translate-x-1/2"
             >
               <a
                 href="#steam"
@@ -116,16 +118,37 @@ export const Header: React.FC<HeaderProps> = ({
                     onTabChange('steam');
                   }
                 }}
-                className={`relative py-2 font-sans text-sm tracking-wide transition-colors duration-200 flex items-baseline gap-2 cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
+                className={`relative py-2 font-orbitron font-bold text-xs lg:text-[13px] tracking-wide transition-colors duration-200 flex items-baseline gap-2 cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
                   activeTab === 'steam'
-                    ? 'text-white font-semibold border-fuchsia-400'
-                    : 'text-gray-400 hover:text-gray-100 font-medium border-transparent'
+                    ? 'text-white border-fuchsia-400'
+                    : 'text-gray-400 hover:text-gray-100 border-transparent'
                 }`}
                 title="Steam Offline Games"
               >
                 <span>Steam Offline</span>
-                <span className="text-xs font-medium tabular-nums text-gray-400">
+                <span className="text-[11px] font-semibold tabular-nums text-gray-400">
                   {steamCount}
+                </span>
+              </a>
+
+              <a
+                href="#steam-online"
+                onClick={(e) => {
+                  if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
+                    e.preventDefault();
+                    onTabChange('steam-online');
+                  }
+                }}
+                className={`relative py-2 font-orbitron font-bold text-xs lg:text-[13px] tracking-wide transition-colors duration-200 flex items-baseline gap-2 cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
+                  activeTab === 'steam-online'
+                    ? 'text-white border-fuchsia-400'
+                    : 'text-gray-400 hover:text-gray-100 border-transparent'
+                }`}
+                title="Steam Online Games"
+              >
+                <span>Steam Online</span>
+                <span className="text-[11px] font-semibold tabular-nums text-gray-400">
+                  {steamOnlineCount}
                 </span>
               </a>
 
@@ -137,15 +160,15 @@ export const Header: React.FC<HeaderProps> = ({
                     onTabChange('product');
                   }
                 }}
-                className={`relative py-2 font-sans text-sm tracking-wide transition-colors duration-200 flex items-baseline gap-2 cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
+                className={`relative py-2 font-orbitron font-bold text-xs lg:text-[13px] tracking-wide transition-colors duration-200 flex items-baseline gap-2 cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
                   activeTab === 'product'
-                    ? 'text-white font-semibold border-fuchsia-400'
-                    : 'text-gray-400 hover:text-gray-100 font-medium border-transparent'
+                    ? 'text-white border-fuchsia-400'
+                    : 'text-gray-400 hover:text-gray-100 border-transparent'
                 }`}
                 title="Physical & Gaming Products"
               >
                 <span>Product</span>
-                <span className="text-xs font-medium tabular-nums text-gray-400">
+                <span className="text-[11px] font-semibold tabular-nums text-gray-400">
                   {productCount}
                 </span>
               </a>
@@ -158,15 +181,15 @@ export const Header: React.FC<HeaderProps> = ({
                     onTabChange('free');
                   }
                 }}
-                className={`relative py-2 font-sans text-sm tracking-wide transition-colors duration-200 flex items-baseline gap-2 cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
+                className={`relative py-2 font-orbitron font-bold text-xs lg:text-[13px] tracking-wide transition-colors duration-200 flex items-baseline gap-2 cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
                   activeTab === 'free'
-                    ? 'text-white font-semibold border-fuchsia-400'
-                    : 'text-gray-400 hover:text-gray-100 font-medium border-transparent'
+                    ? 'text-white border-fuchsia-400'
+                    : 'text-gray-400 hover:text-gray-100 border-transparent'
                 }`}
                 title="Gameថែមពេលទិញ External"
               >
                 <span>GameថែមExternal</span>
-                <span className="text-xs font-medium tabular-nums text-gray-400">
+                <span className="text-[11px] font-semibold tabular-nums text-gray-400">
                   {freeCount}
                 </span>
               </a>
@@ -176,7 +199,7 @@ export const Header: React.FC<HeaderProps> = ({
                 <button
                   type="button"
                   onClick={handlePosClick}
-                  className="relative py-2 font-sans text-sm font-medium tracking-wide transition-colors duration-200 flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 text-cyan-300/90 hover:text-cyan-200 border-b-2 border-transparent"
+                  className="relative py-2 font-orbitron font-bold text-xs lg:text-[13px] tracking-wide transition-colors duration-200 flex items-center gap-1.5 cursor-pointer whitespace-nowrap shrink-0 text-cyan-300/90 hover:text-cyan-200 border-b-2 border-transparent"
                   title="Open POS Cashier Terminal"
                 >
                   <span>POS</span>
@@ -319,14 +342,31 @@ export const Header: React.FC<HeaderProps> = ({
                   onTabChange('steam');
                 }
               }}
-              className={`py-1.5 font-sans text-xs tracking-wide whitespace-nowrap shrink-0 flex items-baseline gap-1.5 transition border-b-2 cursor-pointer ${
+              className={`py-1.5 font-orbitron font-bold text-[11px] tracking-wide whitespace-nowrap shrink-0 flex items-baseline gap-1.5 transition border-b-2 cursor-pointer ${
                 activeTab === 'steam'
-                  ? 'text-white font-semibold border-fuchsia-400'
+                  ? 'text-white border-fuchsia-400'
                   : 'text-gray-400 border-transparent'
               }`}
             >
               <span>Steam Offline</span>
-              <span className="text-[11px] tabular-nums text-gray-400">{steamCount}</span>
+              <span className="text-[10px] font-semibold tabular-nums text-gray-400">{steamCount}</span>
+            </a>
+            <a
+              href="#steam-online"
+              onClick={(e) => {
+                if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
+                  e.preventDefault();
+                  onTabChange('steam-online');
+                }
+              }}
+              className={`py-1.5 font-orbitron font-bold text-[11px] tracking-wide whitespace-nowrap shrink-0 flex items-baseline gap-1.5 transition border-b-2 cursor-pointer ${
+                activeTab === 'steam-online'
+                  ? 'text-white border-fuchsia-400'
+                  : 'text-gray-400 border-transparent'
+              }`}
+            >
+              <span>Steam Online</span>
+              <span className="text-[10px] font-semibold tabular-nums text-gray-400">{steamOnlineCount}</span>
             </a>
             <a
               href="#product"
@@ -336,14 +376,14 @@ export const Header: React.FC<HeaderProps> = ({
                   onTabChange('product');
                 }
               }}
-              className={`py-1.5 font-sans text-xs tracking-wide whitespace-nowrap shrink-0 flex items-baseline gap-1.5 transition border-b-2 cursor-pointer ${
+              className={`py-1.5 font-orbitron font-bold text-[11px] tracking-wide whitespace-nowrap shrink-0 flex items-baseline gap-1.5 transition border-b-2 cursor-pointer ${
                 activeTab === 'product'
-                  ? 'text-white font-semibold border-fuchsia-400'
+                  ? 'text-white border-fuchsia-400'
                   : 'text-gray-400 border-transparent'
               }`}
             >
               <span>Product</span>
-              <span className="text-[11px] tabular-nums text-gray-400">{productCount}</span>
+              <span className="text-[10px] font-semibold tabular-nums text-gray-400">{productCount}</span>
             </a>
             <a
               href="#external"
@@ -353,20 +393,20 @@ export const Header: React.FC<HeaderProps> = ({
                   onTabChange('free');
                 }
               }}
-              className={`py-1.5 font-sans text-xs tracking-wide whitespace-nowrap shrink-0 flex items-baseline gap-1.5 transition border-b-2 cursor-pointer ${
+              className={`py-1.5 font-orbitron font-bold text-[11px] tracking-wide whitespace-nowrap shrink-0 flex items-baseline gap-1.5 transition border-b-2 cursor-pointer ${
                 activeTab === 'free'
-                  ? 'text-white font-semibold border-fuchsia-400'
+                  ? 'text-white border-fuchsia-400'
                   : 'text-gray-400 border-transparent'
               }`}
             >
               <span>GameថែមExternal</span>
-              <span className="text-[11px] tabular-nums text-gray-400">{freeCount}</span>
+              <span className="text-[10px] font-semibold tabular-nums text-gray-400">{freeCount}</span>
             </a>
             {isLoggedIn && (
               <button
                 type="button"
                 onClick={handlePosClick}
-                className="py-1.5 font-sans text-xs font-medium text-cyan-300 whitespace-nowrap shrink-0 cursor-pointer"
+                className="py-1.5 font-orbitron font-bold text-[11px] text-cyan-300 whitespace-nowrap shrink-0 cursor-pointer"
                 title="Open POS Cashier"
               >
                 POS
