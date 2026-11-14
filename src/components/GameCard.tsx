@@ -73,7 +73,7 @@ export const GameCard: React.FC<GameCardProps> = ({
 
   return (
     <div
-      onClick={() => onOpenPreview(game)}
+      onClick={() => onToggleSelect(game)}
       className="group relative aspect-[3/4.25] cursor-pointer transition-transform duration-200 hover:-translate-y-1.5 select-none"
     >
       {/* Neon Outer Rim Wrapper */}
