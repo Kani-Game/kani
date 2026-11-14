@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Game } from '../types/game';
+import { Game, SteamSpecData } from '../types/game';
 import { compressImageFile } from '../utils/imageUtils';
 import { extractSteamAppId, fetchSteamSpec } from '../services/steamService';
 
@@ -85,6 +85,9 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
     editingProduct?.link && extractSteamAppId(editingProduct.link) ? editingProduct.link : ''
   );
   const [steamGenres, setSteamGenres] = useState<string[]>([]);
+  const [fetchedSteamSpec, setFetchedSteamSpec] = useState<SteamSpecData | undefined>(
+    editingProduct?.steamSpec
+  );
   const [isSteamFetching, setIsSteamFetching] = useState(false);
   const [steamFeedback, setSteamFeedback] = useState<{
     type: 'success' | 'error' | 'info';
@@ -124,6 +127,7 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
     setLink(initialLink);
     setSteamAutoLink(extractSteamAppId(initialLink) ? initialLink : '');
     setSteamGenres([]);
+    setFetchedSteamSpec(editingProduct?.steamSpec);
     lastAutoFetchedAppIdRef.current = extractSteamAppId(initialLink);
     setSteamFeedback(null);
     setValidationError(null);
@@ -166,6 +170,7 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
         lastAutoFetchedAppIdRef.current = spec.appId;
 
         setName(spec.matchedName);
+        setFetchedSteamSpec(spec);
         setSteamGenres(Array.isArray(spec.genres) ? spec.genres : []);
         const resolvedGenre =
           spec.primaryGenre || (Array.isArray(spec.genres) ? spec.genres[0] || '' : '');
@@ -384,6 +389,7 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
       stock: isDigital ? undefined : parseInt(stock, 10) || 0,
       description: description.trim() || undefined,
       link: link.trim() || undefined,
+      steamSpec: fetchedSteamSpec,
       createdAt: editingProduct?.createdAt || new Date().toISOString(),
     };
 

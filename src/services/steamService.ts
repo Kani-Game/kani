@@ -1,27 +1,13 @@
-export interface SteamSpecItem {
-  label: string;
-  value: string;
-}
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { db } from './firebase';
+import type {
+  SteamSpecItem,
+  SteamRequirementBlock,
+  SteamSpecData,
+} from '../types/game';
 
-export interface SteamRequirementBlock {
-  items: SteamSpecItem[];
-  notes: string[];
-}
-
-export interface SteamSpecResponse {
-  appId: number;
-  matchedName: string;
-  steamUrl: string;
-  coverImage: string;
-  genres: string[];
-  primaryGenre: string;
-  developers: string[];
-  publishers: string[];
-  releaseDate: string;
-  minimum: SteamRequirementBlock;
-  recommended: SteamRequirementBlock;
-  fetchedAt: number;
-}
+export type { SteamSpecItem, SteamRequirementBlock, SteamSpecData };
+export type SteamSpecResponse = SteamSpecData;
 
 const STEAM_SPEC_CACHE_KEY = 'kani_steam_spec_cache_v1';
 const CLIENT_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -72,8 +58,33 @@ function normalizeLookupName(name?: string): string {
     .toLowerCase();
 }
 
+function toFirestoreTitleDocId(name?: string): string | null {
+  const norm = normalizeLookupName(name)
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 96);
+  return norm ? `title_${norm}` : null;
+}
+
 function buildAliasKey(name?: string, link?: string): string {
   return `${(link || '').trim().toLowerCase()}::${normalizeLookupName(name)}`;
+}
+
+function isValidSteamSpec(obj: unknown): obj is SteamSpecResponse {
+  if (!obj || typeof obj !== 'object') return false;
+  const candidate = obj as Partial<SteamSpecResponse>;
+  return (
+    typeof candidate.appId === 'number' &&
+    Number.isFinite(candidate.appId) &&
+    candidate.appId > 0 &&
+    typeof candidate.matchedName === 'string' &&
+    Boolean(candidate.minimum) &&
+    Boolean(candidate.recommended)
+  );
+}
+
+function sanitizeForFirestore<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value));
 }
 
 function readClientCache(): SteamCacheStore {
@@ -108,7 +119,6 @@ function writeClientCache(store: SteamCacheStore): void {
       JSON.stringify({ byAppId: prunedByAppId, aliases: prunedAliases })
     );
   } catch {
-    // Handle storage quota limits by clearing older Steam cache entries and retrying once
     try {
       const entries = Object.entries(prunedByAppId).slice(-25);
       localStorage.setItem(
@@ -121,6 +131,66 @@ function writeClientCache(store: SteamCacheStore): void {
   }
 }
 
+function saveSpecToClientCache(
+  spec: SteamSpecResponse,
+  name?: string,
+  link?: string
+): void {
+  const store = readClientCache();
+  const expiresAt = Date.now() + CLIENT_CACHE_TTL_MS;
+  store.byAppId[String(spec.appId)] = { data: spec, expiresAt };
+  const aliasKey = buildAliasKey(name, link);
+  if (aliasKey !== '::') {
+    store.aliases[aliasKey] = { appId: spec.appId, expiresAt };
+  }
+  writeClientCache(store);
+}
+
+export async function saveSteamSpecToCloud(
+  spec: SteamSpecResponse,
+  gameName?: string
+): Promise<void> {
+  if (!isValidSteamSpec(spec)) return;
+  const cleanSpec = sanitizeForFirestore(spec);
+  try {
+    await setDoc(doc(db, 'steamSpecs', `app_${spec.appId}`), cleanSpec, { merge: true });
+    const titleDocId = toFirestoreTitleDocId(gameName);
+    if (titleDocId) {
+      await setDoc(doc(db, 'steamSpecs', titleDocId), cleanSpec, { merge: true });
+    }
+  } catch (err) {
+    console.warn('Firestore saveSteamSpecToCloud warning:', err);
+  }
+}
+
+export async function getSteamSpecFromCloud(params: {
+  name?: string;
+  link?: string;
+}): Promise<SteamSpecResponse | null> {
+  try {
+    const directAppId = extractSteamAppId(params.link) || extractSteamAppId(params.name);
+    if (directAppId) {
+      const snap = await getDoc(doc(db, 'steamSpecs', `app_${directAppId}`));
+      if (snap.exists()) {
+        const data = snap.data();
+        if (isValidSteamSpec(data)) return data;
+      }
+    }
+
+    const titleDocId = toFirestoreTitleDocId(params.name);
+    if (titleDocId) {
+      const snap = await getDoc(doc(db, 'steamSpecs', titleDocId));
+      if (snap.exists()) {
+        const data = snap.data();
+        if (isValidSteamSpec(data)) return data;
+      }
+    }
+  } catch (err) {
+    console.warn('Firestore getSteamSpecFromCloud warning:', err);
+  }
+  return null;
+}
+
 export function getCachedSteamSpec(params: {
   name?: string;
   link?: string;
@@ -131,7 +201,7 @@ export function getCachedSteamSpec(params: {
 
   if (directAppId) {
     const entry = store.byAppId[String(directAppId)];
-    if (entry && entry.expiresAt > now) {
+    if (entry && entry.expiresAt > now && isValidSteamSpec(entry.data)) {
       return entry.data;
     }
     return null;
@@ -142,7 +212,7 @@ export function getCachedSteamSpec(params: {
     const alias = store.aliases[aliasKey];
     if (alias && alias.expiresAt > now) {
       const entry = store.byAppId[String(alias.appId)];
-      if (entry && entry.expiresAt > now) {
+      if (entry && entry.expiresAt > now && isValidSteamSpec(entry.data)) {
         return entry.data;
       }
     }
@@ -151,10 +221,56 @@ export function getCachedSteamSpec(params: {
   return null;
 }
 
+async function requestSteamEndpoint(
+  endpointPath: string,
+  queryStr: string
+): Promise<{ spec?: SteamSpecResponse; nonJson?: boolean; error?: string }> {
+  const response = await fetch(`${endpointPath}?${queryStr}`);
+  const contentType = (response.headers.get('content-type') || '').toLowerCase();
+
+  let payload: any = null;
+  const rawText = await response.text();
+  if (rawText) {
+    try {
+      payload = JSON.parse(rawText);
+    } catch {
+      payload = null;
+    }
+  }
+
+  const looksLikeHtml =
+    contentType.includes('text/html') ||
+    rawText.trimStart().startsWith('<!doctype') ||
+    rawText.trimStart().startsWith('<html');
+
+  if (!response.ok) {
+    return {
+      error:
+        payload?.error ||
+        `Steam lookup failed (HTTP ${response.status}).`,
+    };
+  }
+
+  if (looksLikeHtml || payload === null) {
+    return { nonJson: true };
+  }
+
+  if (!isValidSteamSpec(payload)) {
+    return {
+      error:
+        payload?.error ||
+        'Steam returned an incomplete response for this title.',
+    };
+  }
+
+  return { spec: payload };
+}
+
 export async function fetchSteamSpec(params: {
   name?: string;
   link?: string;
   forceRefresh?: boolean;
+  existingSpec?: SteamSpecData;
 }): Promise<SteamSpecResponse> {
   const name = (params.name || '').trim();
   const link = (params.link || '').trim();
@@ -164,6 +280,13 @@ export async function fetchSteamSpec(params: {
     throw new Error('Please provide a Steam Store link or game title.');
   }
 
+  // 1. Saved directly inside Website's Game record
+  if (!forceRefresh && isValidSteamSpec(params.existingSpec)) {
+    saveSpecToClientCache(params.existingSpec, name, link);
+    return params.existingSpec;
+  }
+
+  // 2. LocalStorage 24h cache
   if (!forceRefresh) {
     const cached = getCachedSteamSpec({ name, link });
     if (cached) {
@@ -178,36 +301,42 @@ export async function fetchSteamSpec(params: {
   }
 
   const promise = (async () => {
+    // 3. Shared Website Firestore Database (/steamSpecs)
+    if (!forceRefresh) {
+      const cloudSpec = await getSteamSpecFromCloud({ name, link });
+      if (cloudSpec) {
+        saveSpecToClientCache(cloudSpec, name, link);
+        return cloudSpec;
+      }
+    }
+
+    // 4. Live backend lookup (/api/steam-spec -> fallback /.netlify/functions/steam-spec)
     const query = new URLSearchParams();
     if (name) query.set('name', name);
     if (link) query.set('link', link);
     if (forceRefresh) query.set('refresh', '1');
+    const queryStr = query.toString();
 
-    const response = await fetch(`/api/steam-spec?${query.toString()}`);
-    let payload: any = null;
-    try {
-      payload = await response.json();
-    } catch {
-      payload = null;
+    let result = await requestSteamEndpoint('/api/steam-spec', queryStr);
+    if (result.nonJson) {
+      result = await requestSteamEndpoint('/.netlify/functions/steam-spec', queryStr);
     }
 
-    if (!response.ok) {
-      const errMsg =
-        payload?.error || `Steam lookup failed (HTTP ${response.status}).`;
-      throw new Error(errMsg);
+    if (result.nonJson) {
+      throw new Error(
+        'Steam Store proxy is unreachable on this static host and specs are not saved in the website database yet.'
+      );
     }
 
-    const spec = payload as SteamSpecResponse;
-
-    // Persist in 24-hour browser localStorage cache
-    const store = readClientCache();
-    const expiresAt = Date.now() + CLIENT_CACHE_TTL_MS;
-    store.byAppId[String(spec.appId)] = { data: spec, expiresAt };
-    const aliasKey = buildAliasKey(name, link);
-    if (aliasKey !== '::') {
-      store.aliases[aliasKey] = { appId: spec.appId, expiresAt };
+    if (!result.spec) {
+      throw new Error(result.error || 'Could not retrieve Steam PC system requirements.');
     }
-    writeClientCache(store);
+
+    const spec = result.spec;
+
+    // 5. Persist to local cache AND Website Firestore database (/steamSpecs)
+    saveSpecToClientCache(spec, name, link);
+    void saveSteamSpecToCloud(spec, name);
 
     return spec;
   })().finally(() => {

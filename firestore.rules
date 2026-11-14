@@ -76,5 +76,12 @@ service cloud.firestore {
       allow create, update: if isValidId(userId);
       allow delete: if isValidId(userId);
     }
+
+    // Saved Steam PC System Requirements cache shared across all devices
+    match /steamSpecs/{specId} {
+      allow get, list: if true;
+      allow create, update: if isValidId(specId);
+      allow delete: if isValidId(specId);
+    }
   }
 }

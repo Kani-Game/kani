@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useId, useRef, useCallback } from 'react';
-import { Game, SiteSettings, UserAccountsConfig, UserRole } from '../types/game';
+import { Game, SiteSettings, SteamSpecData, UserAccountsConfig, UserRole } from '../types/game';
 import { StorageService } from '../services/storageService';
 import { POSUploadProductModal } from './POSUploadProductModal';
 import { POSMultiUploadModal } from './POSMultiUploadModal';
@@ -69,6 +69,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [previewError, setPreviewError] = useState(false);
   const [editSteamLink, setEditSteamLink] = useState('');
   const [editSteamGenres, setEditSteamGenres] = useState<string[]>([]);
+  const [editSteamSpec, setEditSteamSpec] = useState<SteamSpecData | undefined>(undefined);
   const [isEditSteamFetching, setIsEditSteamFetching] = useState(false);
   const [editSteamFeedback, setEditSteamFeedback] = useState<{
     type: 'success' | 'error' | 'info';
@@ -76,6 +77,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   } | null>(null);
   const lastEditSteamAppIdRef = useRef<number | null>(null);
   const [specInspectGame, setSpecInspectGame] = useState<Game | null>(null);
+  const [specSyncProgress, setSpecSyncProgress] = useState<{
+    done: number;
+    total: number;
+    saved: number;
+  } | null>(null);
 
 
 
@@ -231,7 +237,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setPreviewError(false);
     const initialSteamId = extractSteamAppId(game.link);
     setEditSteamLink(initialSteamId && game.link ? game.link : '');
-    setEditSteamGenres([]);
+    setEditSteamGenres(game.steamSpec?.genres || []);
+    setEditSteamSpec(game.steamSpec);
     lastEditSteamAppIdRef.current = initialSteamId;
     setEditSteamFeedback(null);
   };
@@ -245,6 +252,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setPreviewError(false);
     setEditSteamLink('');
     setEditSteamGenres([]);
+    setEditSteamSpec(undefined);
     setEditSteamFeedback(null);
     lastEditSteamAppIdRef.current = null;
   };
@@ -285,6 +293,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         lastEditSteamAppIdRef.current = spec.appId;
 
         setFormName(spec.matchedName);
+        setEditSteamSpec(spec);
         setEditSteamGenres(Array.isArray(spec.genres) ? spec.genres : []);
         const resolvedGenre =
           spec.primaryGenre || (Array.isArray(spec.genres) ? spec.genres[0] || '' : '');
@@ -373,6 +382,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         img: formImg.trim(),
         link: formLink.trim() || undefined,
         description: formDesc.trim() || undefined,
+        steamSpec: editSteamSpec,
         price: formPrice !== '' && !isNaN(parseFloat(formPrice)) ? parseFloat(formPrice) : undefined,
         costPrice: formCostPrice !== '' && !isNaN(parseFloat(formCostPrice)) ? parseFloat(formCostPrice) : 0,
       });
@@ -385,6 +395,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         img: formImg.trim(),
         link: formLink.trim() || undefined,
         description: formDesc.trim() || undefined,
+        steamSpec: editSteamSpec,
         price: formPrice !== '' && !isNaN(parseFloat(formPrice)) ? parseFloat(formPrice) : undefined,
         costPrice: formCostPrice !== '' && !isNaN(parseFloat(formCostPrice)) ? parseFloat(formCostPrice) : 0,
       });
@@ -879,8 +890,74 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
 
               {/* Actions */}
-              {selectedGameIds.length > 0 && (
-                <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-2 flex-wrap">
+                {(() => {
+                  const missingSpecsCount = games.filter(
+                    (g) => !g.tag.toLowerCase().includes('product') && !g.steamSpec
+                  ).length;
+                  return (
+                    <button
+                      type="button"
+                      disabled={specSyncProgress !== null || missingSpecsCount === 0}
+                      onClick={async () => {
+                        const targets = games.filter(
+                          (g) => !g.tag.toLowerCase().includes('product') && !g.steamSpec
+                        );
+                        if (targets.length === 0) {
+                          onShowToast('All Steam games already have PC Specs saved in Website DB!');
+                          return;
+                        }
+                        let done = 0;
+                        let saved = 0;
+                        setSpecSyncProgress({ done: 0, total: targets.length, saved: 0 });
+                        const concurrency = 3;
+                        for (let i = 0; i < targets.length; i += concurrency) {
+                          const batch = targets.slice(i, i + concurrency);
+                          await Promise.all(
+                            batch.map(async (target) => {
+                              try {
+                                const spec = await fetchSteamSpec({
+                                  name: target.name,
+                                  link: target.link,
+                                });
+                                onUpdateGame({
+                                  ...target,
+                                  link: target.link || spec.steamUrl,
+                                  steamSpec: spec,
+                                });
+                                saved++;
+                              } catch {
+                                // Skip unmatched entries
+                              } finally {
+                                done++;
+                                setSpecSyncProgress({ done, total: targets.length, saved });
+                              }
+                            })
+                          );
+                        }
+                        setSpecSyncProgress(null);
+                        onShowToast(`🎉 Synced & saved Steam PC Specs for ${saved}/${targets.length} games into Website DB!`);
+                      }}
+                      className="px-3.5 py-2 rounded-xl bg-cyan-950/70 hover:bg-cyan-900/80 disabled:opacity-50 text-cyan-200 border border-cyan-500/40 font-semibold text-xs flex items-center gap-2 transition cursor-pointer whitespace-nowrap"
+                      title="Pull and permanently save Steam PC System Requirements into Website Firestore Database"
+                    >
+                      <i
+                        className={`fa-solid ${
+                          specSyncProgress ? 'fa-spinner fa-spin' : 'fa-cloud-arrow-down'
+                        } text-cyan-300`}
+                      ></i>
+                      <span>
+                        {specSyncProgress
+                          ? `Syncing ${specSyncProgress.done}/${specSyncProgress.total}...`
+                          : missingSpecsCount > 0
+                          ? `Save Steam Specs (${missingSpecsCount})`
+                          : 'All Specs Saved'}
+                      </span>
+                    </button>
+                  );
+                })()}
+
+                {selectedGameIds.length > 0 && (
                   <button
                     type="button"
                     onClick={handleBatchDelete}
@@ -889,8 +966,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <i className="fa-solid fa-trash-can"></i>
                     <span>Delete Selected ({selectedGameIds.length})</span>
                   </button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
 
             {/* Quick Summary Pill Bar */}
@@ -2162,6 +2239,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         }}
         onClose={() => setSpecInspectGame(null)}
         adminHandle={settings.telegramAdminHandle}
+        onSaveGameSpec={(targetGame, spec) => {
+          const updated: Game = {
+            ...targetGame,
+            link: targetGame.link || spec.steamUrl,
+            steamSpec: spec,
+          };
+          onUpdateGame(updated);
+          setSpecInspectGame((prev) => (prev && prev.id === updated.id ? updated : prev));
+        }}
       />
     </div>
   );

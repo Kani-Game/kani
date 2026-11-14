@@ -1,3 +1,28 @@
+export interface SteamSpecItem {
+  label: string;
+  value: string;
+}
+
+export interface SteamRequirementBlock {
+  items: SteamSpecItem[];
+  notes: string[];
+}
+
+export interface SteamSpecData {
+  appId: number;
+  matchedName: string;
+  steamUrl: string;
+  coverImage: string;
+  genres: string[];
+  primaryGenre: string;
+  developers: string[];
+  publishers: string[];
+  releaseDate: string;
+  minimum: SteamRequirementBlock;
+  recommended: SteamRequirementBlock;
+  fetchedAt: number;
+}
+
 export interface Game {
   id: string;
   name: string;
@@ -11,6 +36,7 @@ export interface Game {
   barcode?: string; // Optional SKU or Barcode for POS scanning
   stock?: number; // Stock count or undefined for unlimited digital
   costPrice?: number; // Cost price for profit margins
+  steamSpec?: SteamSpecData; // Saved PC System Requirements synced from Steam
 }
 
 export type GameTab = 'steam' | 'steam-online' | 'free' | 'product' | 'all';

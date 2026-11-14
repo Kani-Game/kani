@@ -14,6 +14,7 @@ interface GameModalProps {
   adminHandle?: string;
   onSendToTelegram?: (game: Game) => void;
   onSelectGenre?: (genre: string) => void;
+  onSaveGameSpec?: (game: Game, spec: SteamSpecResponse) => void;
 }
 
 function getHardwareIconClass(label: string): string {
@@ -121,6 +122,7 @@ export const GameModal: React.FC<GameModalProps> = ({
   adminHandle,
   onSendToTelegram,
   onSelectGenre,
+  onSaveGameSpec,
 }) => {
   const [imgError, setImgError] = useState(false);
   const [steamSpec, setSteamSpec] = useState<SteamSpecResponse | null>(null);
@@ -138,8 +140,12 @@ export const GameModal: React.FC<GameModalProps> = ({
           name: targetGame.name,
           link: targetGame.link,
           forceRefresh,
+          existingSpec: targetGame.steamSpec,
         });
         setSteamSpec(result);
+        if (onSaveGameSpec && (!targetGame.steamSpec || forceRefresh || !targetGame.link)) {
+          onSaveGameSpec(targetGame, result);
+        }
       } catch (err) {
         const message =
           err instanceof Error
@@ -150,7 +156,7 @@ export const GameModal: React.FC<GameModalProps> = ({
         setSpecLoading(false);
       }
     },
-    []
+    [onSaveGameSpec]
   );
 
   useEffect(() => {
@@ -430,9 +436,15 @@ export const GameModal: React.FC<GameModalProps> = ({
 
         {/* Footer */}
         <div className="px-5 py-3 border-t border-purple-900/40 bg-[#0e1529] flex items-center justify-between gap-3">
-          <span className="text-[11px] text-gray-400">
-            {steamSpec ? `App ID: ${steamSpec.appId}` : game.tag}
-          </span>
+          <div className="flex items-center gap-2 text-[11px] text-gray-400">
+            <span>{steamSpec ? `App ID: ${steamSpec.appId}` : game.tag}</span>
+            {steamSpec && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-[10px] font-medium">
+                <i className="fa-solid fa-database text-[9px]"></i>
+                <span>Saved in Website</span>
+              </span>
+            )}
+          </div>
           <button
             type="button"
             onClick={onClose}

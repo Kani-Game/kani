@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { Game } from '../types/game';
+import { Game, SteamSpecData } from '../types/game';
 import { compressImageFile } from '../utils/imageUtils';
 import { extractSteamAppId, fetchSteamSpec } from '../services/steamService';
 
@@ -22,6 +22,7 @@ interface BatchItem {
   barcode: string;
   description: string;
   stock?: number;
+  steamSpec?: SteamSpecData;
   steamStatus?: 'idle' | 'loading' | 'success' | 'error';
   steamMessage?: string;
 }
@@ -117,6 +118,7 @@ export const POSMultiUploadModal: React.FC<POSMultiUploadModalProps> = ({
                     genre: spec.primaryGenre || it.genre,
                     img: spec.coverImage || it.img,
                     link: spec.steamUrl,
+                    steamSpec: spec,
                     // Never auto-fill or overwrite it.description
                     steamStatus: 'success',
                     steamMessage: `App ID: ${spec.appId}`,
@@ -186,6 +188,7 @@ export const POSMultiUploadModal: React.FC<POSMultiUploadModalProps> = ({
                 genre: spec.primaryGenre || it.genre,
                 img: spec.coverImage || it.img,
                 link: spec.steamUrl,
+                steamSpec: spec,
                 // Strictly preserve it.description
                 steamStatus: 'success',
                 steamMessage: `App ID: ${spec.appId}`,
@@ -361,6 +364,7 @@ export const POSMultiUploadModal: React.FC<POSMultiUploadModalProps> = ({
       link: item.link?.trim() || undefined,
       barcode: item.barcode || generateSku(),
       description: item.description.trim() || undefined,
+      steamSpec: item.steamSpec,
       createdAt: new Date().toISOString(),
     }));
 

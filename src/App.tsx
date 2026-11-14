@@ -1092,6 +1092,15 @@ export default function App() {
         onClose={() => setPreviewGame(null)}
         adminHandle={settings.telegramAdminHandle}
         onSendToTelegram={handleSendSingleGameToTelegram}
+        onSaveGameSpec={(targetGame, spec) => {
+          const updated: Game = {
+            ...targetGame,
+            link: targetGame.link || spec.steamUrl,
+            steamSpec: spec,
+          };
+          handleUpdateGame(updated);
+          setPreviewGame((prev) => (prev && prev.id === updated.id ? updated : prev));
+        }}
         onSelectGenre={(genreName) => {
           setGenreFilter(genreName);
           const el = document.getElementById('catalog-section');

@@ -16,9 +16,30 @@
         "costPrice": { "type": "number", "description": "Buy-in cost price in USD" },
         "barcode": { "type": "string", "description": "Optional SKU or barcode" },
         "stock": { "type": "number", "description": "Optional inventory count" },
-        "createdAt": { "type": "string", "description": "ISO timestamp" }
+        "createdAt": { "type": "string", "description": "ISO timestamp" },
+        "steamSpec": { "type": "object", "description": "Saved Steam PC system requirements and metadata" }
       },
       "required": ["name", "tag", "genre", "img"]
+    },
+    "SteamSpec": {
+      "title": "SteamSpec",
+      "description": "Cached Steam PC system requirements and metadata",
+      "type": "object",
+      "properties": {
+        "appId": { "type": "number" },
+        "matchedName": { "type": "string" },
+        "steamUrl": { "type": "string" },
+        "coverImage": { "type": "string" },
+        "genres": { "type": "array" },
+        "primaryGenre": { "type": "string" },
+        "developers": { "type": "array" },
+        "publishers": { "type": "array" },
+        "releaseDate": { "type": "string" },
+        "minimum": { "type": "object" },
+        "recommended": { "type": "object" },
+        "fetchedAt": { "type": "number" }
+      },
+      "required": ["appId", "matchedName", "minimum", "recommended"]
     },
     "POSSale": {
       "title": "POSSale",
@@ -87,6 +108,10 @@
     "/games/{gameId}": {
       "schema": { "$ref": "#/entities/Game" },
       "description": "Collection of games and products synced across all browsers and devices"
+    },
+    "/steamSpecs/{specId}": {
+      "schema": { "$ref": "#/entities/SteamSpec" },
+      "description": "Saved Steam PC system requirements synced for all storefront visitors"
     },
     "/sales/{saleId}": {
       "schema": { "$ref": "#/entities/POSSale" },
