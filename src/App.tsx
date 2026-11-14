@@ -133,8 +133,9 @@ export default function App() {
       setSettings(cloudSettings);
     });
 
-    // Real-Time Cloud Firestore Sync for Financial Report Rows (keeps local cache fresh across all tabs)
+    // Real-Time Cloud Firestore Sync for Financial Report Rows & Expenses (keeps local cache fresh across all tabs)
     const unsubscribeCloudReportRows = StorageService.subscribeToReportRows(() => {});
+    const unsubscribeCloudExpenses = StorageService.subscribeToExpenses(() => {});
 
     // Real-Time Cloud Firestore Sync for User Accounts & Passwords (guarantees all tabs & devices are in lockstep)
     const unsubscribeCloudUserAccounts = StorageService.subscribeToUserAccounts(() => {});
@@ -263,6 +264,7 @@ export default function App() {
       unsubscribeCloudGames();
       unsubscribeCloudSettings();
       unsubscribeCloudReportRows();
+      unsubscribeCloudExpenses();
       unsubscribeCloudUserAccounts();
       window.removeEventListener('hashchange', syncFromUrl);
       window.removeEventListener('popstate', syncFromUrl);
@@ -519,7 +521,6 @@ export default function App() {
     text += `🌟 Game: ${game.name}\n`;
     text += `🏷️ Tag: ${game.tag}\n`;
     if (game.genre) text += `📁 Genre: ${game.genre}\n`;
-    if (game.price) text += `💰 Price: $${game.price.toFixed(2)}\n`;
     text += `\nជម្រាបសួរ Admin @${cleanHandle}, ខ្ញុំចង់កុម្ម៉ង់ Game នេះ! សូមអរគុណ! 🙏`;
 
     try {
@@ -674,8 +675,6 @@ export default function App() {
       <Header
         activeTab={activeTab}
         onTabChange={handleTabChange}
-        searchTerm={searchTerm}
-        onSearchChange={setSearchTerm}
         onClearSearch={() => setSearchTerm('')}
         steamCount={steamGames.length}
         freeCount={freeGames.length}
@@ -766,10 +765,19 @@ export default function App() {
               const handle = settings.telegramAdminHandle.replace('@', '');
               window.open(`https://t.me/${handle}`, '_blank');
             }}
+            onBrowseCatalog={() => {
+              const el = document.getElementById('catalog-section');
+              if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }
+            }}
           />
 
           {/* Category Header & Filter Controls */}
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-3 border-b border-purple-900/30">
+          <div
+            id="catalog-section"
+            className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-3 border-b border-purple-900/30 scroll-mt-24"
+          >
             <div>
               <h3 className="font-orbitron text-xl sm:text-2xl font-bold text-white flex items-center gap-3">
                 {activeTab === 'steam' ? (
@@ -798,32 +806,38 @@ export default function App() {
               </p>
             </div>
 
-            {/* Quick Selection & Filter Controls */}
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              <button
-                onClick={handleSelectAllVisible}
-                className="px-3 py-1.5 bg-purple-900/40 hover:bg-purple-800/60 border border-purple-500/30 text-purple-200 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer"
-              >
-                <i className="fa-solid fa-check-double text-purple-400"></i>
-                <span>ជ្រើសរើសទាំងអស់ (Select All)</span>
-              </button>
-
-              <button
-                onClick={handleClearAllSelection}
-                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-gray-300 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer"
-              >
-                <i className="fa-solid fa-trash-can text-red-400"></i>
-                <span>លុបការជ្រើសរើស</span>
-              </button>
+            {/* Search, Filter & Quick Selection Controls */}
+            <div className="flex flex-wrap items-center gap-2 sm:gap-2.5 w-full sm:w-auto sm:justify-end">
+              {/* Search Bar - Below Hero, Inline with Filters */}
+              <div className="relative w-full sm:w-64 lg:w-72">
+                <i className="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs pointer-events-none"></i>
+                <input
+                  type="text"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="ស្វែងរក Game (Sekiro, GTA V...)"
+                  className="w-full bg-[#131b2e] text-xs text-gray-200 placeholder-gray-500 rounded-lg px-3 py-2 pl-8 pr-8 border border-[#243047] focus:border-purple-500 focus:ring-1 focus:ring-purple-500/30 outline-none transition-all"
+                />
+                {searchTerm && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchTerm('')}
+                    aria-label="Clear search"
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-white cursor-pointer"
+                  >
+                    <i className="fa-solid fa-xmark text-xs"></i>
+                  </button>
+                )}
+              </div>
 
               {/* Genre Filter */}
               {availableGenres.length > 0 && (
                 <select
                   value={genreFilter}
                   onChange={(e) => setGenreFilter(e.target.value)}
-                  className="bg-[#131b2e] text-xs text-gray-300 rounded-lg px-2.5 py-1.5 border border-purple-900/50 outline-none focus:border-purple-500"
+                  className="bg-[#131b2e] text-xs text-gray-200 rounded-lg px-3 py-2 border border-[#243047] outline-none focus:border-purple-500 cursor-pointer"
                 >
-                  <option value="all">គ្រប់ Genre ទាំងអស់</option>
+                  <option value="all">All Genres</option>
                   {availableGenres.map((g) => (
                     <option key={g} value={g}>
                       {g}
@@ -836,12 +850,30 @@ export default function App() {
               <select
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value as any)}
-                className="bg-[#131b2e] text-xs text-gray-300 rounded-lg px-2.5 py-1.5 border border-purple-900/50 outline-none focus:border-purple-500"
+                className="bg-[#131b2e] text-xs text-gray-200 rounded-lg px-3 py-2 border border-[#243047] outline-none focus:border-purple-500 cursor-pointer"
               >
-                <option value="default">លំនាំដើម (Default)</option>
-                <option value="name-asc">ឈ្មោះ Game: A ទៅ Z</option>
-                <option value="name-desc">ឈ្មោះ Game: Z ទៅ A</option>
+                <option value="default">Default</option>
+                <option value="name-asc">A → Z</option>
+                <option value="name-desc">Z → A</option>
               </select>
+
+              <button
+                type="button"
+                onClick={handleSelectAllVisible}
+                className="px-3 py-2 bg-purple-900/40 hover:bg-purple-800/60 border border-purple-500/30 text-purple-200 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <i className="fa-solid fa-check-double text-purple-400"></i>
+                <span>Select All</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleClearAllSelection}
+                className="px-3 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-gray-300 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <i className="fa-solid fa-trash-can text-red-400"></i>
+                <span>Clear</span>
+              </button>
             </div>
           </div>
 

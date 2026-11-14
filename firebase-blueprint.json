@@ -69,7 +69,8 @@
         "portalTitle": { "type": "string" },
         "portalSubtitle": { "type": "string" },
         "khrExchangeRate": { "type": "number" },
-        "posCashierName": { "type": "string" }
+        "posCashierName": { "type": "string" },
+        "coverCards": { "type": "array", "description": "Featured storefront cover promo cards" }
       }
     }
   },

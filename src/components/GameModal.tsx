@@ -21,7 +21,6 @@ export const GameModal: React.FC<GameModalProps> = ({
   const [imgError, setImgError] = useState(false);
   if (!game) return null;
 
-  const isSteam = game.tag.toLowerCase().includes('steam');
   const fallbackImg = `https://placehold.co/800x600/131b2e/ffffff?text=${encodeURIComponent(
     game.name
   )}`;
@@ -33,88 +32,91 @@ export const GameModal: React.FC<GameModalProps> = ({
       onClick={onClose}
     >
       <div
-        className="relative w-full max-w-2xl bg-[#0f172a] border border-purple-500/40 rounded-2xl shadow-2xl overflow-hidden my-8"
+        className="relative w-full max-w-[440px] bg-[#0b1121] border border-amber-500/45 rounded-2xl shadow-[0_24px_70px_rgba(0,0,0,0.85)] overflow-hidden my-6"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Close Button */}
         <button
+          type="button"
           onClick={onClose}
-          className="absolute top-4 right-4 z-20 w-9 h-9 rounded-full bg-black/60 text-gray-300 hover:text-white flex items-center justify-center backdrop-blur-sm hover:bg-purple-600 transition"
+          className="absolute top-3.5 right-3.5 z-20 w-8 h-8 rounded-lg bg-black/60 text-gray-200 hover:text-white flex items-center justify-center backdrop-blur-sm hover:bg-black/85 border border-white/10 transition cursor-pointer"
         >
-          <i className="fa-solid fa-xmark text-lg"></i>
+          <i className="fa-solid fa-xmark text-sm"></i>
         </button>
 
         {/* Cover Image */}
-        <div className="relative h-60 sm:h-80 w-full bg-slate-900">
+        <div className="relative h-[320px] sm:h-[360px] w-full bg-[#0b1121]">
           <img
             src={imgError ? fallbackImg : game.img}
             alt={game.name}
             onError={() => setImgError(true)}
-            className="w-full h-full object-cover"
+            className="w-full h-full object-cover object-top"
           />
-          <div className="absolute inset-0 bg-gradient-to-t from-[#0f172a] via-[#0f172a]/50 to-transparent"></div>
-
-          {/* Badge */}
-          <span
-            className={`absolute top-4 left-4 text-xs font-rajdhani font-bold px-3 py-1 rounded-full uppercase tracking-wider text-white shadow-md ${
-              isSteam ? 'bg-purple-600' : 'bg-cyan-600'
-            }`}
-          >
-            {game.tag}
-          </span>
+          <div className="absolute inset-0 bg-gradient-to-t from-[#0b1121] via-[#0b1121]/30 to-transparent"></div>
         </div>
 
         {/* Content */}
-        <div className="p-6 -mt-10 relative z-10">
-          <div className="flex flex-wrap items-center gap-2 mb-2">
-            <span className="px-2.5 py-0.5 rounded-md bg-purple-900/50 border border-purple-500/30 text-purple-300 text-xs font-semibold">
-              {game.genre}
-            </span>
-            {game.barcode && (
-              <span className="px-2.5 py-0.5 rounded-md bg-slate-800 border border-slate-700 text-gray-300 text-xs font-mono">
-                SKU: {game.barcode}
-              </span>
-            )}
-            {game.link && (
-              <a
-                href={game.link}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="px-2.5 py-0.5 rounded-md bg-blue-900/50 border border-blue-500/30 text-blue-300 hover:text-white text-xs font-semibold inline-flex items-center gap-1.5 transition"
-              >
-                <i className="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
-                <span>Store Page</span>
-              </a>
-            )}
-          </div>
+        <div className="px-5 sm:px-6 pb-5 pt-1 -mt-6 relative z-10">
+          {/* Tag Pill Badge */}
+          <span className="inline-block px-3 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/45 text-amber-400 font-orbitron font-bold text-[10px] uppercase tracking-wider mb-2.5">
+            {game.tag}
+          </span>
 
-
-          <h3 className="font-orbitron text-2xl sm:text-3xl font-extrabold text-white leading-tight mb-5">
+          {/* Game Title */}
+          <h3 className="font-orbitron text-xl sm:text-2xl font-extrabold text-white uppercase tracking-wide leading-snug mb-1">
             {game.name}
           </h3>
 
+          {/* Metadata Line */}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-400 font-medium mb-3">
+            <span>{game.tag}</span>
+            <span>·</span>
+            <span>{game.genre}</span>
+            {game.barcode && (
+              <>
+                <span>·</span>
+                <span className="font-mono">SKU: {game.barcode}</span>
+              </>
+            )}
+            {game.link && (
+              <>
+                <span>·</span>
+                <a
+                  href={game.link}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-cyan-400 hover:text-cyan-300 inline-flex items-center gap-1 transition"
+                >
+                  <span>Store Page</span>
+                  <i className="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
+                </a>
+              </>
+            )}
+          </div>
+
           {/* Action Buttons */}
-          <div className="flex flex-col gap-3">
+          <div className="border-t border-slate-800/90 pt-4 flex flex-col gap-2.5">
             {onSendToTelegram && (
               <button
                 type="button"
                 onClick={() => onSendToTelegram(game)}
-                className="w-full py-3.5 px-6 rounded-xl font-orbitron font-bold text-sm text-center text-white bg-gradient-to-r from-blue-500 via-sky-500 to-cyan-500 hover:from-blue-600 hover:to-cyan-600 transition-all shadow-lg shadow-cyan-900/50 flex items-center justify-center gap-2 cursor-pointer border border-cyan-400/40"
+                className="w-full py-2.5 px-4 rounded-xl font-orbitron font-bold text-xs sm:text-sm text-center text-white bg-gradient-to-r from-[#00b4ff] to-[#00d2ff] hover:from-[#00a2eb] hover:to-[#00bde6] transition-all shadow-lg shadow-cyan-950/60 flex items-center justify-center gap-2 cursor-pointer"
               >
-                <i className="fa-brands fa-telegram text-xl"></i>
+                <i className="fa-brands fa-telegram text-base"></i>
                 <span>ផ្ញើ Game នេះទៅ Admin (@{(adminHandle || 'kanigame168').replace('@', '')})</span>
               </button>
             )}
 
-            <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex items-center gap-2.5">
               <button
+                type="button"
                 onClick={() => {
                   onToggleSelect(game);
                 }}
-                className={`flex-1 py-3 px-6 rounded-xl font-orbitron font-bold text-sm text-center text-white transition shadow-lg flex items-center justify-center gap-2 cursor-pointer ${
+                className={`flex-1 py-2.5 px-4 rounded-xl font-orbitron font-bold text-xs text-center transition flex items-center justify-center gap-2 cursor-pointer ${
                   isSelected
-                    ? 'bg-red-600 hover:bg-red-500 shadow-red-900/50'
-                    : 'bg-purple-600 hover:bg-purple-500 shadow-purple-900/50'
+                    ? 'bg-red-600/90 hover:bg-red-500 text-white shadow-md shadow-red-950/50'
+                    : 'bg-[#1e293b] hover:bg-[#273549] text-gray-100 border border-slate-700/80'
                 }`}
               >
                 <i
@@ -124,8 +126,9 @@ export const GameModal: React.FC<GameModalProps> = ({
               </button>
 
               <button
+                type="button"
                 onClick={onClose}
-                className="py-3 px-6 rounded-xl font-rajdhani font-bold text-sm bg-slate-800 hover:bg-slate-700 text-gray-200 border border-slate-700 transition cursor-pointer"
+                className="py-2.5 px-4 rounded-xl font-rajdhani font-bold text-xs sm:text-sm bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/45 transition cursor-pointer shrink-0"
               >
                 បិទ (Close)
               </button>

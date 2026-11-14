@@ -275,6 +275,10 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
   const [isAddingExpense, setIsAddingExpense] = useState(false);
   const [newExpenseName, setNewExpenseName] = useState('');
   const [newExpensePrice, setNewExpensePrice] = useState('0');
+  const [expensePriceDrafts, setExpensePriceDrafts] = useState<Record<string, string>>({});
+  const [expenseNameDrafts, setExpenseNameDrafts] = useState<Record<string, string>>({});
+  const expenseSaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+  const dirtyExpenseIdsRef = useRef<Set<string>>(new Set());
 
   // POS Sale Inspection Modal
   const [inspectedSale, setInspectedSale] = useState<POSSaleRecord | null>(null);
@@ -483,9 +487,18 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
     });
 
     const unsubExpenses = StorageService.subscribeToExpenses((cloudExpenses) => {
-      if (cloudExpenses && cloudExpenses.length > 0) {
-        setExpenses(cloudExpenses);
-      }
+      const nextCloud = cloudExpenses || [];
+      setExpenses((prev) => {
+        if (dirtyExpenseIdsRef.current.size === 0) {
+          return nextCloud;
+        }
+        const prevMap = new Map(prev.map((item) => [item.id, item]));
+        return nextCloud.map((cloudItem) =>
+          dirtyExpenseIdsRef.current.has(cloudItem.id) && prevMap.has(cloudItem.id)
+            ? prevMap.get(cloudItem.id)!
+            : cloudItem
+        );
+      });
     });
 
     const unsubSales = StorageService.subscribeToSales((cloudSales) => {
@@ -496,6 +509,7 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
       unsubRows();
       unsubExpenses();
       unsubSales();
+      Object.values(expenseSaveTimersRef.current).forEach((timer) => clearTimeout(timer));
     };
   }, []);
 
@@ -708,10 +722,86 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
   };
 
   // ================= EXPENSE ACTIONS =================
+  const flushExpenseUpdate = (id: string, updates: Partial<ExpenseItem>) => {
+    StorageService.updateExpense(id, updates);
+    setTimeout(() => {
+      dirtyExpenseIdsRef.current.delete(id);
+    }, 500);
+  };
+
   const handleUpdateExpensePrice = (id: string, priceStr: string) => {
-    const val = parseFloat(priceStr) || 0;
-    StorageService.updateExpense(id, { price: val });
-    setExpenses(StorageService.getExpenses());
+    dirtyExpenseIdsRef.current.add(id);
+    setExpensePriceDrafts((prev) => ({ ...prev, [id]: priceStr }));
+    const val = parseFloat(priceStr);
+    const numericVal = isNaN(val) ? 0 : val;
+
+    setExpenses((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, price: numericVal } : item))
+    );
+
+    if (expenseSaveTimersRef.current[`price_${id}`]) {
+      clearTimeout(expenseSaveTimersRef.current[`price_${id}`]);
+    }
+    expenseSaveTimersRef.current[`price_${id}`] = setTimeout(() => {
+      delete expenseSaveTimersRef.current[`price_${id}`];
+      flushExpenseUpdate(id, { price: numericVal });
+    }, 350);
+  };
+
+  const handleBlurExpensePrice = (id: string) => {
+    const draft = expensePriceDrafts[id];
+    if (expenseSaveTimersRef.current[`price_${id}`]) {
+      clearTimeout(expenseSaveTimersRef.current[`price_${id}`]);
+      delete expenseSaveTimersRef.current[`price_${id}`];
+    }
+    if (draft !== undefined) {
+      const parsed = parseFloat(draft);
+      const numericVal = isNaN(parsed) ? 0 : parsed;
+      flushExpenseUpdate(id, { price: numericVal });
+      setExpensePriceDrafts((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
+  };
+
+  const handleUpdateExpenseName = (id: string, nameStr: string) => {
+    dirtyExpenseIdsRef.current.add(id);
+    setExpenseNameDrafts((prev) => ({ ...prev, [id]: nameStr }));
+    setExpenses((prev) =>
+      prev.map((item) => (item.id === id ? { ...item, name: nameStr } : item))
+    );
+
+    if (expenseSaveTimersRef.current[`name_${id}`]) {
+      clearTimeout(expenseSaveTimersRef.current[`name_${id}`]);
+    }
+    expenseSaveTimersRef.current[`name_${id}`] = setTimeout(() => {
+      const trimmed = nameStr.trim();
+      if (trimmed) {
+        flushExpenseUpdate(id, { name: trimmed });
+      }
+    }, 450);
+  };
+
+  const handleBlurExpenseName = (id: string, fallbackName: string) => {
+    const draft = expenseNameDrafts[id];
+    if (expenseSaveTimersRef.current[`name_${id}`]) {
+      clearTimeout(expenseSaveTimersRef.current[`name_${id}`]);
+      delete expenseSaveTimersRef.current[`name_${id}`];
+    }
+    if (draft !== undefined) {
+      const finalName = draft.trim() || fallbackName || 'Expense';
+      setExpenses((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, name: finalName } : item))
+      );
+      flushExpenseUpdate(id, { name: finalName });
+      setExpenseNameDrafts((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    }
   };
 
   const handleAddExpenseItem = (e: React.FormEvent) => {
@@ -723,10 +813,17 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
     setNewExpenseName('');
     setNewExpensePrice('0');
     setIsAddingExpense(false);
-    onShowToast?.('បានបន្ថែមចំណាយថ្មីជោគជ័យ!', 'success');
+    onShowToast?.('បានបន្ថែមចំណាយថ្មី និង Sync ទៅ Cloud ជោគជ័យ!', 'success');
   };
 
   const handleDeleteExpense = (id: string) => {
+    if (expenseSaveTimersRef.current[`price_${id}`]) {
+      clearTimeout(expenseSaveTimersRef.current[`price_${id}`]);
+    }
+    if (expenseSaveTimersRef.current[`name_${id}`]) {
+      clearTimeout(expenseSaveTimersRef.current[`name_${id}`]);
+    }
+    dirtyExpenseIdsRef.current.delete(id);
     StorageService.deleteExpense(id);
     setExpenses(StorageService.getExpenses());
     onShowToast?.('បានលុបចំណាយរួចរាល់', 'info');
@@ -1730,17 +1827,42 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
                           className="hover:bg-white/[0.03] transition-colors group cursor-pointer"
                         >
                           <td className={`${sizeConfig.cellPy} ${sizeConfig.cellPx} font-medium text-gray-300`}>
-                            {exp.name}
+                            <input
+                              type="text"
+                              value={expenseNameDrafts[exp.id] !== undefined ? expenseNameDrafts[exp.id] : exp.name}
+                              onChange={(e) => handleUpdateExpenseName(exp.id, e.target.value)}
+                              onBlur={() => handleBlurExpenseName(exp.id, exp.name)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  (e.currentTarget as HTMLInputElement).blur();
+                                }
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="w-full bg-transparent text-gray-300 font-medium focus:bg-[#141b2c] focus:px-1.5 py-0.5 rounded border border-transparent focus:border-emerald-500/60 outline-none"
+                            />
                           </td>
                           <td className={`${sizeConfig.cellPy} ${sizeConfig.cellPx} text-right font-mono`}>
                             <input
                               type="number"
-                              step="0.5"
-                              value={exp.price || ''}
+                              step="any"
+                              value={
+                                expensePriceDrafts[exp.id] !== undefined
+                                  ? expensePriceDrafts[exp.id]
+                                  : exp.price
+                                  ? String(exp.price)
+                                  : ''
+                              }
                               placeholder="0.00"
                               onChange={(e) =>
                                 handleUpdateExpensePrice(exp.id, e.target.value)
                               }
+                              onBlur={() => handleBlurExpensePrice(exp.id)}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') {
+                                  (e.currentTarget as HTMLInputElement).blur();
+                                }
+                              }}
+                              onClick={(e) => e.stopPropagation()}
                               className={`w-20 bg-[#141b2c] text-right text-rose-300 px-1.5 py-0.5 rounded border border-gray-700 focus:border-rose-500 outline-none ${sizeConfig.monoText}`}
                             />
                           </td>

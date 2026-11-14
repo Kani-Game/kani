@@ -104,6 +104,20 @@ export interface POSSaleRecord {
   status: 'completed' | 'refunded';
 }
 
+export type CoverCardBadgeColor = 'emerald' | 'orange' | 'fuchsia' | 'rose' | 'cyan' | 'purple';
+
+export interface CoverCard {
+  id: string;
+  title: string;
+  subtitle?: string;
+  image: string;
+  topPrefix?: string;     // Blue slanted tag e.g. 'Up to'
+  topHighlight?: string;  // Orange slanted tag e.g. '-50%' or '$5.00'
+  badgeText?: string;     // Label badge e.g. 'NEW', 'BESTSELLER', 'PREORDER', 'PROMO'
+  badgeColor?: CoverCardBadgeColor;
+  price?: number;         // Price in USD e.g. 5.00
+}
+
 export interface SiteSettings {
   portalTitle: string;
   portalSubtitle: string;
@@ -117,6 +131,7 @@ export interface SiteSettings {
   posCashierName?: string; // Default 'Kani Cashier'
   qrCodeImage?: string; // ABA KHQR / Bakong payment QR code base64 or URL
   qrCodeLabel?: string; // Label for QR code e.g. 'ABA PAY / KHQR'
+  coverCards?: CoverCard[]; // Featured cover promo cards at top of storefront
 }
 
 export type UserRole = 'admin' | 'pos';

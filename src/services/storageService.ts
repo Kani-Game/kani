@@ -58,6 +58,7 @@ async function atomicBatchDelete(collName: string, ids: string[]): Promise<void>
 // Mutex flags to prevent race condition when Firestore emits intermediate snapshots during large uploads
 let isBatchWritingReportRows = false;
 let isBatchWritingGames = false;
+let isBatchWritingExpenses = false;
 
 const STORAGE_KEY_GAMES = 'kanigame_catalog_v1';
 const STORAGE_KEY_SETTINGS = 'kanigame_settings_v1';
@@ -68,6 +69,7 @@ const STORAGE_KEY_POS_SALES = 'kanigame_pos_sales_v1';
 const STORAGE_KEY_REPORT_ROWS = 'kanigame_report_rows_v2';
 const STORAGE_KEY_REPORT_INITIALIZED = 'kanigame_report_initialized_v2';
 const STORAGE_KEY_EXPENSES = 'kanigame_expenses_v2';
+const STORAGE_KEY_EXPENSES_INITIALIZED = 'kanigame_expenses_initialized_v2';
 const STORAGE_KEY_VERSION_HISTORY = 'kanigame_version_history_v1';
 
 export const DEFAULT_SETTINGS: SiteSettings = {
@@ -1383,6 +1385,21 @@ export const StorageService = {
     } catch {}
   },
 
+  markExpensesInitialized(): void {
+    try {
+      localStorage.setItem(STORAGE_KEY_EXPENSES_INITIALIZED, 'true');
+      setDoc(doc(db, 'settings', 'expenseMeta'), { initialized: true }, { merge: true }).catch(() => {});
+    } catch {}
+  },
+
+  isExpensesInitialized(): boolean {
+    try {
+      return localStorage.getItem(STORAGE_KEY_EXPENSES_INITIALIZED) === 'true';
+    } catch {
+      return false;
+    }
+  },
+
   // Real-time Cloud Listener for Operating Expenses
   subscribeToExpenses(callback: (expenses: ExpenseItem[]) => void): () => void {
     const collRef = collection(db, 'expenses');
@@ -1392,24 +1409,75 @@ export const StorageService = {
         if (!snapshot.empty) {
           const cloudExpenses: ExpenseItem[] = [];
           snapshot.forEach((docSnap) => {
-            cloudExpenses.push(docSnap.data() as ExpenseItem);
+            const data = docSnap.data() as any;
+            cloudExpenses.push({
+              ...data,
+              id: data.id || docSnap.id,
+              name: String(data.name ?? ''),
+              price: Number(data.price) || 0,
+            });
           });
           cloudExpenses.sort((a: any, b: any) => {
-            if (typeof a.sortIndex === 'number' && typeof b.sortIndex === 'number') {
+            const aHas = typeof a.sortIndex === 'number';
+            const bHas = typeof b.sortIndex === 'number';
+            if (aHas && bHas) {
               return a.sortIndex - b.sortIndex;
             }
-            return 0;
+            if (aHas) return -1;
+            if (bHas) return 1;
+            return String(a.id).localeCompare(String(b.id));
           });
+          this.markExpensesInitialized();
+
+          // Prevent race condition during batch writes
+          if (isBatchWritingExpenses) {
+            const localExpenses = this.getExpenses();
+            if (localExpenses.length > cloudExpenses.length) {
+              return;
+            }
+          }
+
           try {
             localStorage.setItem(STORAGE_KEY_EXPENSES, JSON.stringify(cloudExpenses));
             idbSet(STORAGE_KEY_EXPENSES, cloudExpenses).catch(() => {});
           } catch {}
           callback(cloudExpenses);
         } else {
-          // If Firestore is empty on first boot, seed with INITIAL_EXPENSES
-          INITIAL_EXPENSES.forEach((e, idx) => {
-            setDoc(doc(db, 'expenses', e.id), cleanFirestoreDoc({ ...e, sortIndex: idx })).catch(() => {});
-          });
+          // If Firestore collection is empty, check if it was already initialized
+          if (this.isExpensesInitialized()) {
+            try {
+              localStorage.setItem(STORAGE_KEY_EXPENSES, JSON.stringify([]));
+              idbSet(STORAGE_KEY_EXPENSES, []).catch(() => {});
+            } catch {}
+            callback([]);
+            return;
+          }
+
+          // Check cloud expenseMeta doc before deciding whether to seed
+          getDoc(doc(db, 'settings', 'expenseMeta'))
+            .then((metaSnap) => {
+              if (metaSnap.exists() && metaSnap.data()?.initialized) {
+                this.markExpensesInitialized();
+                try {
+                  localStorage.setItem(STORAGE_KEY_EXPENSES, JSON.stringify([]));
+                  idbSet(STORAGE_KEY_EXPENSES, []).catch(() => {});
+                } catch {}
+                callback([]);
+              } else {
+                // First boot only on clean project: seed once and mark initialized
+                this.markExpensesInitialized();
+                const batchItems = INITIAL_EXPENSES.map((e, idx) => ({
+                  id: e.id,
+                  data: { ...e, sortIndex: idx },
+                }));
+                atomicBatchSet('expenses', batchItems).catch((err) => {
+                  console.warn('Firestore initial expense seed warning:', err);
+                });
+              }
+            })
+            .catch(() => {
+              callback([]);
+            });
         }
       },
       (error) => {
@@ -1433,64 +1501,143 @@ export const StorageService = {
     } catch (e) {
       console.error('Failed to load expenses', e);
     }
-    this.saveExpenses(INITIAL_EXPENSES);
+    if (this.isExpensesInitialized()) {
+      return [];
+    }
+    // Cache locally until Firestore snapshot resolves — never overwrite Firestore with defaults from getExpenses()!
+    try {
+      localStorage.setItem(STORAGE_KEY_EXPENSES, JSON.stringify(INITIAL_EXPENSES));
+    } catch {}
     return INITIAL_EXPENSES;
   },
 
   saveExpenses(expenses: ExpenseItem[]): void {
     try {
-      localStorage.setItem(STORAGE_KEY_EXPENSES, JSON.stringify(expenses));
-      idbSet(STORAGE_KEY_EXPENSES, expenses).catch(() => {});
+      this.markExpensesInitialized();
+      const sanitizedExpenses: ExpenseItem[] = expenses.map((e, idx) => ({
+        ...e,
+        id: sanitizeFirestoreId(e.id || `exp_${Date.now()}_${idx}_${Math.random().toString(36).substring(2, 6)}`),
+        price: Number(e.price) || 0,
+      }));
 
-      // Sync to Firestore with sortIndex
-      expenses.forEach((e, idx) => {
-        setDoc(doc(db, 'expenses', e.id), cleanFirestoreDoc({ ...e, sortIndex: idx })).catch(() => {});
-      });
+      const existing = this.getExpenses();
+      const newIds = new Set(sanitizedExpenses.map((e) => e.id));
+      const idsToDelete = existing.filter((e) => !newIds.has(e.id)).map((e) => e.id);
+
+      localStorage.setItem(STORAGE_KEY_EXPENSES, JSON.stringify(sanitizedExpenses));
+      idbSet(STORAGE_KEY_EXPENSES, sanitizedExpenses).catch(() => {});
+
+      isBatchWritingExpenses = true;
+      (async () => {
+        try {
+          if (idsToDelete.length > 0) {
+            await atomicBatchDelete('expenses', idsToDelete);
+          }
+          const batchItems = sanitizedExpenses.map((e, idx) => ({
+            id: e.id,
+            data: { ...e, sortIndex: idx },
+          }));
+          await atomicBatchSet('expenses', batchItems);
+        } catch (err) {
+          console.warn('Firestore atomic batch saveExpenses warning:', err);
+          if (err instanceof Error && err.message.toLowerCase().includes('permission')) {
+            handleFirestoreError(err, OperationType.WRITE, 'expenses');
+          }
+        } finally {
+          setTimeout(() => {
+            isBatchWritingExpenses = false;
+          }, 800);
+        }
+      })();
     } catch (e) {
       console.error('Failed to save expenses', e);
     }
   },
 
   addExpense(item: Omit<ExpenseItem, 'id'> & { id?: string }): ExpenseItem {
+    this.markExpensesInitialized();
     const expenses = this.getExpenses();
+    const cleanId = sanitizeFirestoreId(
+      item.id || `exp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+    );
     const newItem: ExpenseItem = {
       ...item,
-      id: item.id || `exp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      id: cleanId,
+      price: Number(item.price) || 0,
     };
+    const sortIndex = expenses.length;
     const updated = [...expenses, newItem];
-    this.saveExpenses(updated);
 
     try {
-      setDoc(doc(db, 'expenses', newItem.id), cleanFirestoreDoc(newItem)).catch(() => {});
-    } catch (err) {
+      localStorage.setItem(STORAGE_KEY_EXPENSES, JSON.stringify(updated));
+      idbSet(STORAGE_KEY_EXPENSES, updated).catch(() => {});
+    } catch {}
+
+    setDoc(
+      doc(db, 'expenses', newItem.id),
+      cleanFirestoreDoc({ ...newItem, sortIndex })
+    ).catch((err) => {
       console.warn('Firestore addExpense failed:', err);
-    }
+      if (err instanceof Error && err.message.toLowerCase().includes('permission')) {
+        handleFirestoreError(err, OperationType.CREATE, `expenses/${newItem.id}`);
+      }
+    });
 
     return newItem;
   },
 
   updateExpense(id: string, updates: Partial<ExpenseItem>): void {
+    this.markExpensesInitialized();
     const expenses = this.getExpenses();
-    const updated = expenses.map((e) => (e.id === id ? { ...e, ...updates } : e));
-    this.saveExpenses(updated);
+    const targetIndex = expenses.findIndex((e) => e.id === id);
+    const existingItem = targetIndex >= 0 ? expenses[targetIndex] : null;
+    const updatedTarget: ExpenseItem | null = existingItem
+      ? {
+          ...existingItem,
+          ...updates,
+          price: updates.price !== undefined ? Number(updates.price) || 0 : Number(existingItem.price) || 0,
+        }
+      : null;
+    const updated =
+      updatedTarget && targetIndex >= 0
+        ? expenses.map((e, idx) => (idx === targetIndex ? updatedTarget : e))
+        : expenses;
 
     try {
-      setDoc(doc(db, 'expenses', id), cleanFirestoreDoc(updates), { merge: true }).catch(() => {});
-    } catch (err) {
+      localStorage.setItem(STORAGE_KEY_EXPENSES, JSON.stringify(updated));
+      idbSet(STORAGE_KEY_EXPENSES, updated).catch(() => {});
+    } catch {}
+
+    const cleanId = sanitizeFirestoreId(id);
+    const payload: Record<string, any> = updatedTarget
+      ? { ...updatedTarget, sortIndex: targetIndex }
+      : { ...updates };
+
+    setDoc(doc(db, 'expenses', cleanId), cleanFirestoreDoc(payload), { merge: true }).catch((err) => {
       console.warn('Firestore updateExpense failed:', err);
-    }
+      if (err instanceof Error && err.message.toLowerCase().includes('permission')) {
+        handleFirestoreError(err, OperationType.UPDATE, `expenses/${cleanId}`);
+      }
+    });
   },
 
   deleteExpense(id: string): void {
+    this.markExpensesInitialized();
     const expenses = this.getExpenses();
     const filtered = expenses.filter((e) => e.id !== id);
-    this.saveExpenses(filtered);
 
     try {
-      deleteDoc(doc(db, 'expenses', id)).catch(() => {});
-    } catch (err) {
+      localStorage.setItem(STORAGE_KEY_EXPENSES, JSON.stringify(filtered));
+      idbSet(STORAGE_KEY_EXPENSES, filtered).catch(() => {});
+    } catch {}
+
+    const cleanId = sanitizeFirestoreId(id);
+    deleteDoc(doc(db, 'expenses', cleanId)).catch((err) => {
       console.warn('Firestore deleteExpense failed:', err);
-    }
+      if (err instanceof Error && err.message.toLowerCase().includes('permission')) {
+        handleFirestoreError(err, OperationType.DELETE, `expenses/${cleanId}`);
+      }
+    });
   },
 
   // Calculate standard financial stats using Table3_11 exact formulas
