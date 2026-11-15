@@ -130,6 +130,7 @@ export const GameModal: React.FC<GameModalProps> = ({
   const [specError, setSpecError] = useState<string | null>(null);
 
   const isProduct = Boolean(game?.tag.toLowerCase().includes('product'));
+  const isSteamSkipped = Boolean(game?.skipSteamLink);
 
   const loadSpecs = useCallback(
     async (targetGame: Game, forceRefresh = false) => {
@@ -143,7 +144,7 @@ export const GameModal: React.FC<GameModalProps> = ({
           existingSpec: targetGame.steamSpec,
         });
         setSteamSpec(result);
-        if (onSaveGameSpec && (!targetGame.steamSpec || forceRefresh || !targetGame.link)) {
+        if (onSaveGameSpec && (!targetGame.steamSpec || forceRefresh)) {
           onSaveGameSpec(targetGame, result);
         }
       } catch (err) {
@@ -166,7 +167,7 @@ export const GameModal: React.FC<GameModalProps> = ({
     setSpecLoading(false);
 
     if (!game) return;
-    if (!game.tag.toLowerCase().includes('product')) {
+    if (!game.tag.toLowerCase().includes('product') && !game.skipSteamLink) {
       void loadSpecs(game, false);
     }
   }, [game, loadSpecs]);
@@ -179,7 +180,7 @@ export const GameModal: React.FC<GameModalProps> = ({
   const activeCover = !imgError
     ? game.img || steamSpec?.coverImage || fallbackImg
     : steamSpec?.coverImage || fallbackImg;
-  const steamStoreUrl = steamSpec?.steamUrl || game.link;
+  const steamStoreUrl = game.link || (!isSteamSkipped ? steamSpec?.steamUrl : undefined);
 
   return (
     <div
@@ -343,7 +344,7 @@ export const GameModal: React.FC<GameModalProps> = ({
               </div>
 
               <div className="flex items-center gap-2">
-                {(steamSpec || !isProduct) && (
+                {(steamSpec || (!isProduct && !isSteamSkipped)) && (
                   <button
                     type="button"
                     disabled={specLoading}
@@ -360,15 +361,17 @@ export const GameModal: React.FC<GameModalProps> = ({
               </div>
             </div>
 
-            {/* Product Item: Manual Load Button (Skip Auto-Fetch) */}
-            {isProduct && !steamSpec && !specLoading && !specError && (
+            {/* Product or Unlinked Item: Manual Load Button (Skip Auto-Fetch) */}
+            {(isProduct || isSteamSkipped) && !steamSpec && !specLoading && !specError && (
               <div className="rounded-xl border border-indigo-500/30 bg-[#10162b] p-5 flex flex-col sm:flex-row items-center justify-between gap-4">
                 <div className="text-center sm:text-left">
                   <p className="text-xs font-semibold text-gray-200">
-                    Hardware / Product Item
+                    {isProduct ? 'Hardware / Product Item' : 'Not Linked to Steam Store'}
                   </p>
                   <p className="text-[11px] text-gray-400 mt-0.5">
-                    Auto-lookup is skipped for Products. Click below if you want to check Steam Store info anyway.
+                    {isProduct
+                      ? 'Auto-lookup is skipped for Products. Click below if you want to check Steam Store info anyway.'
+                      : 'Steam auto-linking is turned off for this game. Click below only if you want to manually look up PC Specs.'}
                   </p>
                 </div>
                 <button

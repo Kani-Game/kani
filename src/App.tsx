@@ -1095,7 +1095,6 @@ export default function App() {
         onSaveGameSpec={(targetGame, spec) => {
           const updated: Game = {
             ...targetGame,
-            link: targetGame.link || spec.steamUrl,
             steamSpec: spec,
           };
           handleUpdateGame(updated);

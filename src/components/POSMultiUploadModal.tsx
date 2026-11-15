@@ -23,6 +23,7 @@ interface BatchItem {
   description: string;
   stock?: number;
   steamSpec?: SteamSpecData;
+  skipSteamLink?: boolean;
   steamStatus?: 'idle' | 'loading' | 'success' | 'error';
   steamMessage?: string;
 }
@@ -55,6 +56,7 @@ export const POSMultiUploadModal: React.FC<POSMultiUploadModalProps> = ({
   const [defaultDescription, setDefaultDescription] = useState(
     'Steam Offline Account with Lifetime Access'
   );
+  const [defaultSkipSteamLink, setDefaultSkipSteamLink] = useState(true);
   const [isProcessingFiles, setIsProcessingFiles] = useState(false);
   const [processedCount, setProcessedCount] = useState(0);
   const [totalFilesToProcess, setTotalFilesToProcess] = useState(0);
@@ -119,6 +121,7 @@ export const POSMultiUploadModal: React.FC<POSMultiUploadModalProps> = ({
                     img: spec.coverImage || it.img,
                     link: spec.steamUrl,
                     steamSpec: spec,
+                    skipSteamLink: false,
                     // Never auto-fill or overwrite it.description
                     steamStatus: 'success',
                     steamMessage: `App ID: ${spec.appId}`,
@@ -189,6 +192,7 @@ export const POSMultiUploadModal: React.FC<POSMultiUploadModalProps> = ({
                 img: spec.coverImage || it.img,
                 link: spec.steamUrl,
                 steamSpec: spec,
+                skipSteamLink: false,
                 // Strictly preserve it.description
                 steamStatus: 'success',
                 steamMessage: `App ID: ${spec.appId}`,
@@ -239,6 +243,7 @@ export const POSMultiUploadModal: React.FC<POSMultiUploadModalProps> = ({
           img: compressedBase64,
           barcode: generateSku(),
           description: defaultDescription,
+          skipSteamLink: defaultSkipSteamLink,
           steamStatus: 'idle',
         });
       } catch (err) {
@@ -293,6 +298,7 @@ export const POSMultiUploadModal: React.FC<POSMultiUploadModalProps> = ({
         link: detectedAppId ? firstToken : undefined,
         barcode: generateSku(),
         description: itemNote,
+        skipSteamLink: detectedAppId ? false : defaultSkipSteamLink,
         steamStatus: detectedAppId ? 'loading' : 'idle',
       };
 
@@ -364,7 +370,8 @@ export const POSMultiUploadModal: React.FC<POSMultiUploadModalProps> = ({
       link: item.link?.trim() || undefined,
       barcode: item.barcode || generateSku(),
       description: item.description.trim() || undefined,
-      steamSpec: item.steamSpec,
+      steamSpec: item.skipSteamLink ? undefined : item.steamSpec,
+      skipSteamLink: Boolean(item.skipSteamLink),
       createdAt: new Date().toISOString(),
     }));
 
@@ -421,9 +428,23 @@ export const POSMultiUploadModal: React.FC<POSMultiUploadModalProps> = ({
                 <i className="fa-solid fa-sliders text-cyan-400"></i>
                 <span>BATCH DEFAULT PRESETS (APPLY TO UPLOADED ITEMS)</span>
               </span>
-              <span className="text-[11px] text-gray-400 font-rajdhani">
-                Rate: $1 = {exchangeRate.toLocaleString()} ៛
-              </span>
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0a0f1d] border border-purple-500/35 text-[11px] text-gray-200 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={defaultSkipSteamLink}
+                    onChange={(e) => {
+                      const nextSkip = e.target.checked;
+                      setDefaultSkipSteamLink(nextSkip);
+                    }}
+                    className="rounded accent-purple-500 cursor-pointer"
+                  />
+                  <span>Don&apos;t auto-link new items to Steam</span>
+                </label>
+                <span className="text-[11px] text-gray-400 font-rajdhani">
+                  Rate: $1 = {exchangeRate.toLocaleString()} ៛
+                </span>
+              </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
@@ -696,11 +717,23 @@ export const POSMultiUploadModal: React.FC<POSMultiUploadModalProps> = ({
               </div>
 
               {items.length > 0 && (
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2.5 flex-wrap">
                   <button
                     type="button"
                     disabled={isSteamBatchFetching}
-                    onClick={() => void runConcurrentSteamBatch(items, true)}
+                    onClick={() => {
+                      const syncable = items.filter(
+                        (it) => !it.skipSteamLink || Boolean(extractSteamAppId(it.link))
+                      );
+                      if (syncable.length === 0) {
+                        onShowToast(
+                          'No items have Steam Link enabled. Click "No Steam" on an item to enable linking, or paste Steam URLs.',
+                          'info'
+                        );
+                        return;
+                      }
+                      void runConcurrentSteamBatch(syncable, true);
+                    }}
                     className="px-3 py-1 rounded-lg bg-cyan-950/70 hover:bg-cyan-900/80 disabled:opacity-50 text-cyan-300 border border-cyan-500/35 text-xs font-semibold flex items-center gap-1.5 cursor-pointer transition"
                   >
                     <i
@@ -708,7 +741,15 @@ export const POSMultiUploadModal: React.FC<POSMultiUploadModalProps> = ({
                         isSteamBatchFetching ? 'fa-spinner fa-spin' : 'fa-rotate'
                       } text-[11px]`}
                     ></i>
-                    <span>Sync All with Steam</span>
+                    <span>
+                      Sync Linked (
+                      {
+                        items.filter(
+                          (it) => !it.skipSteamLink || Boolean(extractSteamAppId(it.link))
+                        ).length
+                      }
+                      ) with Steam
+                    </span>
                   </button>
                   <button
                     type="button"
@@ -786,7 +827,13 @@ export const POSMultiUploadModal: React.FC<POSMultiUploadModalProps> = ({
                         <input
                           type="text"
                           value={item.link || ''}
-                          onChange={(e) => handleUpdateItem(item.id, { link: e.target.value })}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            handleUpdateItem(item.id, {
+                              link: val,
+                              ...(extractSteamAppId(val) ? { skipSteamLink: false } : {}),
+                            });
+                          }}
                           placeholder="Steam Store Link (optional)"
                           className="w-full bg-[#0a0f1d]/80 text-[10px] text-cyan-300 placeholder-gray-600 rounded-md px-2 py-1 border border-cyan-900/40 focus:border-cyan-400 outline-none font-mono"
                         />
@@ -859,14 +906,49 @@ export const POSMultiUploadModal: React.FC<POSMultiUploadModalProps> = ({
                       </div>
                     </div>
 
-                    {/* Row Actions: Steam Refresh & Delete */}
+                    {/* Row Actions: Steam Toggle, Refresh & Delete */}
                     <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextSkip = !item.skipSteamLink;
+                          handleUpdateItem(item.id, {
+                            skipSteamLink: nextSkip,
+                            ...(nextSkip
+                              ? {
+                                  steamSpec: undefined,
+                                  steamStatus: 'idle',
+                                  steamMessage: undefined,
+                                  link: extractSteamAppId(item.link) ? '' : item.link,
+                                }
+                              : {}),
+                          });
+                        }}
+                        className={`h-8 px-2 rounded-lg border text-[10px] font-bold flex items-center gap-1 transition cursor-pointer ${
+                          item.skipSteamLink
+                            ? 'bg-slate-800/80 hover:bg-slate-700 text-gray-400 border-slate-700'
+                            : 'bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-300 border-emerald-500/40'
+                        }`}
+                        title={
+                          item.skipSteamLink
+                            ? 'Steam Link is OFF — click to enable Steam linking for this item'
+                            : 'Steam Link is ON — click to unlink Steam'
+                        }
+                      >
+                        <i
+                          className={`fa-solid ${
+                            item.skipSteamLink ? 'fa-link-slash' : 'fa-link'
+                          } text-[10px]`}
+                        ></i>
+                        <span>{item.skipSteamLink ? 'No Steam' : 'Linked'}</span>
+                      </button>
+
                       <button
                         type="button"
                         disabled={item.steamStatus === 'loading'}
                         onClick={() => void handleRefreshRowSteam(item)}
                         className="w-8 h-8 rounded-lg bg-cyan-950/60 hover:bg-cyan-900/80 disabled:opacity-50 text-cyan-300 border border-cyan-500/35 flex items-center justify-center transition cursor-pointer"
-                        title="Refresh Name, Cover & Genre from Steam Store"
+                        title="Fetch / Refresh Name, Cover & Genre from Steam Store"
                       >
                         <i
                           className={`fa-solid fa-rotate text-xs ${

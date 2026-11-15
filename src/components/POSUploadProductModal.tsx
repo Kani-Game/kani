@@ -88,6 +88,12 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
   const [fetchedSteamSpec, setFetchedSteamSpec] = useState<SteamSpecData | undefined>(
     editingProduct?.steamSpec
   );
+  const [linkToSteam, setLinkToSteam] = useState<boolean>(
+    editingProduct
+      ? !editingProduct.skipSteamLink &&
+          Boolean(editingProduct.steamSpec || extractSteamAppId(editingProduct.link))
+      : false
+  );
   const [isSteamFetching, setIsSteamFetching] = useState(false);
   const [steamFeedback, setSteamFeedback] = useState<{
     type: 'success' | 'error' | 'info';
@@ -124,12 +130,19 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
     setIsDigital(editingProduct?.stock === undefined);
     setDescription(editingProduct?.description || '');
     const initialLink = editingProduct?.link || '';
+    const hasInitialSteam = Boolean(
+      editingProduct?.steamSpec || extractSteamAppId(initialLink)
+    );
     setLink(initialLink);
     setSteamAutoLink(extractSteamAppId(initialLink) ? initialLink : '');
-    setSteamGenres([]);
+    setSteamGenres(editingProduct?.steamSpec?.genres || []);
     setFetchedSteamSpec(editingProduct?.steamSpec);
+    setLinkToSteam(
+      editingProduct ? !editingProduct.skipSteamLink && hasInitialSteam : false
+    );
     lastAutoFetchedAppIdRef.current = extractSteamAppId(initialLink);
     setSteamFeedback(null);
+    setPasteFeedback(null);
     setValidationError(null);
     setImgError(false);
   }, [isOpen, editingProduct]);
@@ -171,6 +184,7 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
 
         setName(spec.matchedName);
         setFetchedSteamSpec(spec);
+        setLinkToSteam(true);
         setSteamGenres(Array.isArray(spec.genres) ? spec.genres : []);
         const resolvedGenre =
           spec.primaryGenre || (Array.isArray(spec.genres) ? spec.genres[0] || '' : '');
@@ -389,7 +403,8 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
       stock: isDigital ? undefined : parseInt(stock, 10) || 0,
       description: description.trim() || undefined,
       link: link.trim() || undefined,
-      steamSpec: fetchedSteamSpec,
+      steamSpec: linkToSteam ? fetchedSteamSpec : undefined,
+      skipSteamLink: !linkToSteam,
       createdAt: editingProduct?.createdAt || new Date().toISOString(),
     };
 
@@ -463,24 +478,61 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             {/* Left Column: Essential Product Info */}
             <div className="space-y-4">
-              {/* Steam Store Link (Auto-Fill) Above Game Name */}
-              <div className="p-3 rounded-xl bg-gradient-to-br from-[#131c34] to-[#10172b] border border-cyan-500/35 space-y-2">
-                <div className="flex items-center justify-between gap-2">
+              {/* Steam Store Link (Optional — Disabled by Default for Unlinked Games) */}
+              <div className="p-3 rounded-xl bg-gradient-to-br from-[#131c34] to-[#10172b] border border-cyan-500/35 space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <label className="text-xs font-semibold text-cyan-300 uppercase tracking-wider flex items-center gap-1.5">
                     <i className="fa-brands fa-steam text-sm"></i>
-                    <span>Steam Store Link (Auto)</span>
+                    <span>Steam Store Link (Optional)</span>
                   </label>
-                  <span className="text-[10px] text-gray-400">
-                    Auto-fills Name, Cover, Genre &amp; Link
-                  </span>
+
+                  <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0a0f1d] border border-purple-500/35 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={!linkToSteam}
+                      onChange={(e) => {
+                        const skip = e.target.checked;
+                        setLinkToSteam(!skip);
+                        if (skip) {
+                          setFetchedSteamSpec(undefined);
+                          setSteamGenres([]);
+                          setSteamAutoLink('');
+                          setSteamFeedback(null);
+                          lastAutoFetchedAppIdRef.current = null;
+                          if (extractSteamAppId(link)) {
+                            setLink('');
+                          }
+                        }
+                      }}
+                      className="rounded accent-purple-500 cursor-pointer"
+                    />
+                    <span className="text-[11px] font-semibold text-gray-200">
+                      Don&apos;t link to Steam
+                    </span>
+                  </label>
                 </div>
+
+                {!linkToSteam && (
+                  <p className="text-[11px] text-amber-200/85 bg-amber-950/30 border border-amber-500/25 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                    <i className="fa-solid fa-link-slash text-amber-400 text-[11px] shrink-0"></i>
+                    <span>
+                      Not linked to Steam — your game name will NOT auto-link. Paste a Steam URL below only if you want to link this game.
+                    </span>
+                  </p>
+                )}
 
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
                     value={steamAutoLink}
-                    onChange={(e) => setSteamAutoLink(e.target.value)}
-                    placeholder="https://store.steampowered.com/app/..."
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSteamAutoLink(val);
+                      if (extractSteamAppId(val)) {
+                        setLinkToSteam(true);
+                      }
+                    }}
+                    placeholder="Optional: paste Steam link to auto-fill..."
                     className="flex-1 min-w-0 bg-[#0a0f1d] text-xs text-white placeholder-gray-500 rounded-xl px-3 py-2 border border-cyan-500/30 focus:border-cyan-400 outline-none"
                   />
                   <button
@@ -1051,6 +1103,7 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
                       setLink(val);
                       if (extractSteamAppId(val)) {
                         setSteamAutoLink(val);
+                        setLinkToSteam(true);
                       }
                     }}
                     placeholder="Official Store / Steam / Telegram Download Link (Optional)"

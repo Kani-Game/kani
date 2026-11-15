@@ -17,7 +17,8 @@
         "barcode": { "type": "string", "description": "Optional SKU or barcode" },
         "stock": { "type": "number", "description": "Optional inventory count" },
         "createdAt": { "type": "string", "description": "ISO timestamp" },
-        "steamSpec": { "type": "object", "description": "Saved Steam PC system requirements and metadata" }
+        "steamSpec": { "type": "object", "description": "Saved Steam PC system requirements and metadata" },
+        "skipSteamLink": { "type": "boolean", "description": "When true, skip automatic Steam Store linking by game name" }
       },
       "required": ["name", "tag", "genre", "img"]
     },

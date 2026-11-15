@@ -37,6 +37,7 @@ export interface Game {
   stock?: number; // Stock count or undefined for unlimited digital
   costPrice?: number; // Cost price for profit margins
   steamSpec?: SteamSpecData; // Saved PC System Requirements synced from Steam
+  skipSteamLink?: boolean; // When true, do not auto-link or auto-fetch Steam Store data by game name
 }
 
 export type GameTab = 'steam' | 'steam-online' | 'free' | 'product' | 'all';

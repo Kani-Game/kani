@@ -70,6 +70,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [editSteamLink, setEditSteamLink] = useState('');
   const [editSteamGenres, setEditSteamGenres] = useState<string[]>([]);
   const [editSteamSpec, setEditSteamSpec] = useState<SteamSpecData | undefined>(undefined);
+  const [formSkipSteamLink, setFormSkipSteamLink] = useState(false);
   const [isEditSteamFetching, setIsEditSteamFetching] = useState(false);
   const [editSteamFeedback, setEditSteamFeedback] = useState<{
     type: 'success' | 'error' | 'info';
@@ -239,6 +240,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setEditSteamLink(initialSteamId && game.link ? game.link : '');
     setEditSteamGenres(game.steamSpec?.genres || []);
     setEditSteamSpec(game.steamSpec);
+    setFormSkipSteamLink(Boolean(game.skipSteamLink));
     lastEditSteamAppIdRef.current = initialSteamId;
     setEditSteamFeedback(null);
   };
@@ -253,6 +255,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setEditSteamLink('');
     setEditSteamGenres([]);
     setEditSteamSpec(undefined);
+    setFormSkipSteamLink(false);
     setEditSteamFeedback(null);
     lastEditSteamAppIdRef.current = null;
   };
@@ -294,6 +297,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
         setFormName(spec.matchedName);
         setEditSteamSpec(spec);
+        setFormSkipSteamLink(false);
         setEditSteamGenres(Array.isArray(spec.genres) ? spec.genres : []);
         const resolvedGenre =
           spec.primaryGenre || (Array.isArray(spec.genres) ? spec.genres[0] || '' : '');
@@ -382,7 +386,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         img: formImg.trim(),
         link: formLink.trim() || undefined,
         description: formDesc.trim() || undefined,
-        steamSpec: editSteamSpec,
+        steamSpec: formSkipSteamLink ? undefined : editSteamSpec,
+        skipSteamLink: formSkipSteamLink,
         price: formPrice !== '' && !isNaN(parseFloat(formPrice)) ? parseFloat(formPrice) : undefined,
         costPrice: formCostPrice !== '' && !isNaN(parseFloat(formCostPrice)) ? parseFloat(formCostPrice) : 0,
       });
@@ -395,7 +400,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         img: formImg.trim(),
         link: formLink.trim() || undefined,
         description: formDesc.trim() || undefined,
-        steamSpec: editSteamSpec,
+        steamSpec: formSkipSteamLink ? undefined : editSteamSpec,
+        skipSteamLink: formSkipSteamLink,
         price: formPrice !== '' && !isNaN(parseFloat(formPrice)) ? parseFloat(formPrice) : undefined,
         costPrice: formCostPrice !== '' && !isNaN(parseFloat(formCostPrice)) ? parseFloat(formCostPrice) : 0,
       });
@@ -893,7 +899,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="flex items-center gap-2 flex-wrap">
                 {(() => {
                   const missingSpecsCount = games.filter(
-                    (g) => !g.tag.toLowerCase().includes('product') && !g.steamSpec
+                    (g) => !g.tag.toLowerCase().includes('product') && !g.skipSteamLink && !g.steamSpec
                   ).length;
                   return (
                     <button
@@ -901,10 +907,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       disabled={specSyncProgress !== null || missingSpecsCount === 0}
                       onClick={async () => {
                         const targets = games.filter(
-                          (g) => !g.tag.toLowerCase().includes('product') && !g.steamSpec
+                          (g) => !g.tag.toLowerCase().includes('product') && !g.skipSteamLink && !g.steamSpec
                         );
                         if (targets.length === 0) {
-                          onShowToast('All Steam games already have PC Specs saved in Website DB!');
+                          onShowToast('All Steam-enabled games already have PC Specs saved in Website DB!');
                           return;
                         }
                         let done = 0;
@@ -922,7 +928,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 });
                                 onUpdateGame({
                                   ...target,
-                                  link: target.link || spec.steamUrl,
                                   steamSpec: spec,
                                 });
                                 saved++;
@@ -1084,6 +1089,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   <i className="fa-solid fa-arrow-up-right-from-square text-[9px]"></i>
                                   <span className="truncate">{game.link}</span>
                                 </a>
+                              ) : game.skipSteamLink ? (
+                                <span className="text-[10px] text-amber-300/80 inline-flex items-center gap-1 mt-0.5">
+                                  <i className="fa-solid fa-link-slash text-[9px]"></i>
+                                  <span>Not linked to Steam</span>
+                                </span>
                               ) : (
                                 <span className="text-[10px] text-gray-500">No store URL</span>
                               )}
@@ -1181,23 +1191,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
 
               <form onSubmit={handleSubmitSingleGame} className="space-y-4">
-                {/* Steam Store Link (Auto-Fill) Above Game Title */}
+                {/* Steam Store Link (Optional — Can be Unlinked) */}
                 <div className="p-3 rounded-xl bg-gradient-to-br from-[#131c34] to-[#10172b] border border-cyan-500/35 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
                     <label className="text-xs font-semibold text-cyan-300 uppercase tracking-wider flex items-center gap-1.5">
                       <i className="fa-brands fa-steam text-sm"></i>
-                      <span>Steam Store Link (Auto)</span>
+                      <span>Steam Store Link (Optional)</span>
                     </label>
-                    <span className="text-[10px] text-gray-400">
-                      Auto-fills Name, Cover, Genre &amp; Link
-                    </span>
+                    <label className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-[#0a0f1d] border border-purple-500/35 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={formSkipSteamLink}
+                        onChange={(e) => {
+                          const skip = e.target.checked;
+                          setFormSkipSteamLink(skip);
+                          if (skip) {
+                            setEditSteamSpec(undefined);
+                            setEditSteamGenres([]);
+                            setEditSteamLink('');
+                            setEditSteamFeedback(null);
+                            lastEditSteamAppIdRef.current = null;
+                            if (extractSteamAppId(formLink)) {
+                              setFormLink('');
+                            }
+                          }
+                        }}
+                        className="rounded accent-purple-500 cursor-pointer"
+                      />
+                      <span className="text-[11px] font-semibold text-gray-200">
+                        Don&apos;t link to Steam
+                      </span>
+                    </label>
                   </div>
+
+                  {formSkipSteamLink && (
+                    <p className="text-[11px] text-amber-200/85 bg-amber-950/30 border border-amber-500/25 rounded-lg px-2.5 py-1.5 flex items-center gap-1.5">
+                      <i className="fa-solid fa-link-slash text-amber-400 text-[11px] shrink-0"></i>
+                      <span>
+                        Not linked to Steam — this game will not auto-link by name.
+                      </span>
+                    </p>
+                  )}
 
                   <div className="flex items-center gap-2">
                     <input
                       type="text"
                       value={editSteamLink}
-                      onChange={(e) => setEditSteamLink(e.target.value)}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setEditSteamLink(val);
+                        if (extractSteamAppId(val)) {
+                          setFormSkipSteamLink(false);
+                        }
+                      }}
                       placeholder="https://store.steampowered.com/app/..."
                       className="flex-1 min-w-0 bg-[#0a0f1d] text-xs text-white placeholder-gray-500 rounded-xl px-3 py-2 border border-cyan-500/30 focus:border-cyan-400 outline-none"
                     />
@@ -1475,6 +1521,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       setFormLink(val);
                       if (extractSteamAppId(val)) {
                         setEditSteamLink(val);
+                        setFormSkipSteamLink(false);
                       }
                     }}
                     placeholder="https://..."
@@ -2242,7 +2289,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         onSaveGameSpec={(targetGame, spec) => {
           const updated: Game = {
             ...targetGame,
-            link: targetGame.link || spec.steamUrl,
             steamSpec: spec,
           };
           onUpdateGame(updated);
