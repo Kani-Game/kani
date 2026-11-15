@@ -1,5 +1,5 @@
 import { ALL_INITIAL_GAMES, INITIAL_PRODUCTS } from '../data/initialGames';
-import { Game, POSSaleRecord, SiteSettings, DailyReportRow, ExpenseItem, ReportCategory, ReportVersionSnapshot, UserAccount, UserAccountsConfig, UserRole, AdminAuth } from '../types/game';
+import { Game, POSSaleRecord, SiteSettings, DailyReportRow, ExpenseItem, ReportCategory, ReportVersionSnapshot, ReportSavingsConfig, MonthlyTransferEntry, UserAccount, UserAccountsConfig, UserRole, AdminAuth } from '../types/game';
 import { collection, doc, setDoc, deleteDoc, onSnapshot, getDoc, getDocs, query, orderBy, writeBatch } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
 
@@ -71,6 +71,128 @@ const STORAGE_KEY_REPORT_INITIALIZED = 'kanigame_report_initialized_v2';
 const STORAGE_KEY_EXPENSES = 'kanigame_expenses_v2';
 const STORAGE_KEY_EXPENSES_INITIALIZED = 'kanigame_expenses_initialized_v2';
 const STORAGE_KEY_VERSION_HISTORY = 'kanigame_version_history_v1';
+const STORAGE_KEY_REPORT_SAVINGS = 'kanigame_report_savings_v1';
+
+export const DEFAULT_BASE_SAVINGS_MONTH = '2026-11';
+
+export const DEFAULT_REPORT_SAVINGS: ReportSavingsConfig = {
+  transferToSave: 0,
+  transferToSaveD: 0,
+  prevSave: 5565,
+  prevSaveD: 1435,
+  baseMonthKey: DEFAULT_BASE_SAVINGS_MONTH,
+  monthlyTransfers: {},
+};
+
+export function getReportMonthKey(year: number, monthIndexZeroBased: number): string {
+  const m = Math.max(0, Math.min(11, monthIndexZeroBased)) + 1;
+  return `${year}-${String(m).padStart(2, '0')}`;
+}
+
+export function normalizeReportSavings(raw?: any): ReportSavingsConfig {
+  const baseMonthKey =
+    typeof raw?.baseMonthKey === 'string' && /^\d{4}-\d{2}$/.test(raw.baseMonthKey)
+      ? raw.baseMonthKey
+      : DEFAULT_BASE_SAVINGS_MONTH;
+
+  const prevSave =
+    typeof raw?.prevSave === 'number' && !isNaN(raw.prevSave)
+      ? raw.prevSave
+      : DEFAULT_REPORT_SAVINGS.prevSave;
+  const prevSaveD =
+    typeof raw?.prevSaveD === 'number' && !isNaN(raw.prevSaveD)
+      ? raw.prevSaveD
+      : DEFAULT_REPORT_SAVINGS.prevSaveD;
+
+  const transferToSave =
+    typeof raw?.transferToSave === 'number' && !isNaN(raw.transferToSave)
+      ? raw.transferToSave
+      : 0;
+  const transferToSaveD =
+    typeof raw?.transferToSaveD === 'number' && !isNaN(raw.transferToSaveD)
+      ? raw.transferToSaveD
+      : 0;
+
+  const monthlyTransfers: Record<string, MonthlyTransferEntry> = {};
+  if (raw?.monthlyTransfers && typeof raw.monthlyTransfers === 'object') {
+    for (const [k, v] of Object.entries(raw.monthlyTransfers)) {
+      if (/^\d{4}-\d{2}$/.test(k) && v && typeof v === 'object') {
+        const entry = v as any;
+        monthlyTransfers[k] = {
+          transferToSave:
+            typeof entry.transferToSave === 'number' && !isNaN(entry.transferToSave)
+              ? entry.transferToSave
+              : 0,
+          transferToSaveD:
+            typeof entry.transferToSaveD === 'number' && !isNaN(entry.transferToSaveD)
+              ? entry.transferToSaveD
+              : 0,
+          updatedAt: typeof entry.updatedAt === 'string' ? entry.updatedAt : undefined,
+        };
+      }
+    }
+  }
+
+  // Migrate legacy single-month top-level transfers into baseMonthKey if monthlyTransfers is empty
+  if (Object.keys(monthlyTransfers).length === 0 && (transferToSave !== 0 || transferToSaveD !== 0)) {
+    monthlyTransfers[baseMonthKey] = {
+      transferToSave,
+      transferToSaveD,
+      updatedAt: raw?.updatedAt,
+    };
+  }
+
+  return {
+    transferToSave,
+    transferToSaveD,
+    prevSave,
+    prevSaveD,
+    baseMonthKey,
+    monthlyTransfers,
+    updatedAt: raw?.updatedAt,
+  };
+}
+
+export function getMonthlySavingsSummary(
+  config: ReportSavingsConfig,
+  year: number,
+  monthIndexZeroBased: number
+) {
+  const normalized = normalizeReportSavings(config);
+  const baseKey = normalized.baseMonthKey || DEFAULT_BASE_SAVINGS_MONTH;
+  const targetKey = getReportMonthKey(year, monthIndexZeroBased);
+  const map = normalized.monthlyTransfers || {};
+
+  let carrySave = normalized.prevSave;
+  let carrySaveD = normalized.prevSaveD;
+
+  // Automatically accumulate all prior months from baseKey up to (but not including) targetKey
+  for (const [mKey, entry] of Object.entries(map)) {
+    if (mKey >= baseKey && mKey < targetKey) {
+      carrySave += Number(entry.transferToSave) || 0;
+      carrySaveD += Number(entry.transferToSaveD) || 0;
+    }
+  }
+
+  const currentEntry = map[targetKey];
+  const transferToSave = currentEntry ? Number(currentEntry.transferToSave) || 0 : 0;
+  const transferToSaveD = currentEntry ? Number(currentEntry.transferToSaveD) || 0 : 0;
+  const endingSave = carrySave + transferToSave;
+  const endingSaveD = carrySaveD + transferToSaveD;
+
+  return {
+    monthKey: targetKey,
+    baseMonthKey: baseKey,
+    isAutoCarryForward: targetKey > baseKey,
+    openingSave: carrySave,
+    openingSaveD: carrySaveD,
+    transferToSave,
+    transferToSaveD,
+    endingSave,
+    endingSaveD,
+    totalSavings: endingSave + endingSaveD,
+  };
+}
 
 export const DEFAULT_SETTINGS: SiteSettings = {
   portalTitle: 'KANI GAME',
@@ -1687,6 +1809,72 @@ export const StorageService = {
     };
   },
 
+  // Financial Report Transfer & Savings Balances (/settings/reportSavings)
+  getReportSavings(): ReportSavingsConfig {
+    try {
+      const data = localStorage.getItem(STORAGE_KEY_REPORT_SAVINGS);
+      if (data) {
+        const parsed = JSON.parse(data);
+        if (parsed && typeof parsed === 'object') {
+          return normalizeReportSavings(parsed);
+        }
+      }
+    } catch (e) {
+      console.error('Error reading report savings', e);
+    }
+    return normalizeReportSavings(DEFAULT_REPORT_SAVINGS);
+  },
+
+  saveReportSavings(config: ReportSavingsConfig): void {
+    const normalized = normalizeReportSavings({
+      ...config,
+      updatedAt: new Date().toISOString(),
+    });
+    try {
+      localStorage.setItem(STORAGE_KEY_REPORT_SAVINGS, JSON.stringify(normalized));
+      idbSet(STORAGE_KEY_REPORT_SAVINGS, normalized).catch(() => {});
+      setDoc(doc(db, 'settings', 'reportSavings'), cleanFirestoreDoc(normalized), { merge: true }).catch((err) => {
+        console.warn('Firestore saveReportSavings warning:', err);
+        if (err instanceof Error && err.message.toLowerCase().includes('permission')) {
+          handleFirestoreError(err, OperationType.WRITE, 'settings/reportSavings');
+        }
+      });
+    } catch (e) {
+      console.error('Failed to save report savings', e);
+    }
+  },
+
+  subscribeToReportSavings(callback: (config: ReportSavingsConfig) => void): () => void {
+    try {
+      const docRef = doc(db, 'settings', 'reportSavings');
+      const unsubscribe = onSnapshot(
+        docRef,
+        (snapshot) => {
+          if (snapshot.exists()) {
+            const merged = normalizeReportSavings(snapshot.data());
+            try {
+              localStorage.setItem(STORAGE_KEY_REPORT_SAVINGS, JSON.stringify(merged));
+              idbSet(STORAGE_KEY_REPORT_SAVINGS, merged).catch(() => {});
+            } catch {}
+            callback(merged);
+          } else {
+            const current = this.getReportSavings();
+            setDoc(docRef, cleanFirestoreDoc(current), { merge: true }).catch(() => {});
+          }
+        },
+        (error) => {
+          console.warn('Firestore reportSavings listener warning:', error);
+          if (error instanceof Error && error.message.toLowerCase().includes('permission')) {
+            handleFirestoreError(error, OperationType.GET, 'settings/reportSavings');
+          }
+        }
+      );
+      return unsubscribe;
+    } catch {
+      return () => {};
+    }
+  },
+
   // Real-time Cloud Listener for Version History Snapshots
   subscribeToVersionHistory(callback: (history: ReportVersionSnapshot[]) => void): () => void {
     const collRef = collection(db, 'versionHistory');
@@ -1897,6 +2085,7 @@ export const StorageService = {
       posSales: this.getSales(),
       reportRows: this.getReportRows(),
       expenses: this.getExpenses(),
+      reportSavings: this.getReportSavings(),
       versionHistory: this.getVersionHistory(),
     };
     return JSON.stringify(payload, null, 2);
@@ -1923,6 +2112,9 @@ export const StorageService = {
         }
         if (Array.isArray(parsed.expenses)) {
           this.saveExpenses(parsed.expenses);
+        }
+        if (parsed.reportSavings) {
+          this.saveReportSavings(parsed.reportSavings);
         }
         if (Array.isArray(parsed.versionHistory)) {
           this.saveVersionHistory(parsed.versionHistory);

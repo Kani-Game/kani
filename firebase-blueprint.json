@@ -103,6 +103,20 @@
         "posCashierName": { "type": "string" },
         "coverCards": { "type": "array", "description": "Featured storefront cover promo cards" }
       }
+    },
+    "ReportSavings": {
+      "title": "ReportSavings",
+      "description": "Financial report transfer inputs and previous month savings base balances with monthly auto carry-forward",
+      "type": "object",
+      "properties": {
+        "transferToSave": { "type": "number" },
+        "transferToSaveD": { "type": "number" },
+        "prevSave": { "type": "number" },
+        "prevSaveD": { "type": "number" },
+        "baseMonthKey": { "type": "string" },
+        "monthlyTransfers": { "type": "object" },
+        "updatedAt": { "type": "string" }
+      }
     }
   },
   "firestore": {
@@ -128,7 +142,7 @@
     },
     "/settings/{settingId}": {
       "schema": { "$ref": "#/entities/SiteSettings" },
-      "description": "Portal and POS configuration settings"
+      "description": "Portal, POS, and Financial Report savings configuration settings"
     },
     "/versionHistory/{versionId}": {
       "schema": { "type": "object" },

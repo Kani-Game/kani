@@ -66,6 +66,22 @@ export interface ExpenseItem {
   price: number;
 }
 
+export interface MonthlyTransferEntry {
+  transferToSave: number;
+  transferToSaveD: number;
+  updatedAt?: string;
+}
+
+export interface ReportSavingsConfig {
+  transferToSave: number;
+  transferToSaveD: number;
+  prevSave: number; // Base Save before baseMonthKey (default 5565)
+  prevSaveD: number; // Base Save D before baseMonthKey (default 1435)
+  baseMonthKey?: string; // e.g. "2026-11"
+  monthlyTransfers?: Record<string, MonthlyTransferEntry>; // keyed by "YYYY-MM"
+  updatedAt?: string;
+}
+
 export interface ReportVersionSnapshot {
   id: string;
   versionName: string;

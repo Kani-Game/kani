@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express, { type Request, type Response } from 'express';
+import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -604,13 +605,19 @@ async function startServer() {
     }
   });
 
+  const httpServer = http.createServer(app);
+
   const isProd =
     process.env.NODE_ENV === 'production' || process.env.npm_lifecycle_event === 'start';
 
   if (!isProd) {
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        allowedHosts: true,
+        ws: { server: httpServer },
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);
@@ -628,7 +635,7 @@ async function startServer() {
     }
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT} (${isProd ? 'production' : 'development'})`);
   });
 }

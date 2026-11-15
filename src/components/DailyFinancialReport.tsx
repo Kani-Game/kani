@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { DailyReportRow, ExpenseItem, ReportCategory, POSSaleRecord } from '../types/game';
-import { StorageService, formatReportDate } from '../services/storageService';
+import { DailyReportRow, ExpenseItem, ReportCategory, POSSaleRecord, ReportSavingsConfig } from '../types/game';
+import { StorageService, formatReportDate, DEFAULT_REPORT_SAVINGS, getMonthlySavingsSummary } from '../services/storageService';
 
 export type FinancialTextSize = 'sm' | 'md' | 'lg' | 'xl';
 
@@ -255,9 +255,19 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
   const [categoryFilter, setCategoryFilter] = useState<'all' | 'Product' | 'Steam offline' | 'Account'>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Active month/year for the calendar grid
-  const [selectedYear, setSelectedYear] = useState<number>(2026);
-  const [selectedMonth, setSelectedMonth] = useState<number>(10); // 0-indexed: 10 = November
+  // Active month/year for the calendar grid (auto-advances when real calendar moves past Nov 2026)
+  const [selectedYear, setSelectedYear] = useState<number>(() => {
+    const now = new Date();
+    return now.getFullYear() > 2026 || (now.getFullYear() === 2026 && now.getMonth() >= 10)
+      ? now.getFullYear()
+      : 2026;
+  });
+  const [selectedMonth, setSelectedMonth] = useState<number>(() => {
+    const now = new Date();
+    return now.getFullYear() > 2026 || (now.getFullYear() === 2026 && now.getMonth() >= 10)
+      ? now.getMonth()
+      : 10; // 0-indexed: 10 = November
+  });
 
   // Inline editing state for rows
   const [editingRowId, setEditingRowId] = useState<string | null>(null);
@@ -279,6 +289,24 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
   const [expenseNameDrafts, setExpenseNameDrafts] = useState<Record<string, string>>({});
   const expenseSaveTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
   const dirtyExpenseIdsRef = useRef<Set<string>>(new Set());
+
+  // Transfer & Savings Balances (Cols T - U: U10..U16)
+  const [savings, setSavings] = useState<ReportSavingsConfig>(() => StorageService.getReportSavings());
+  const savingsRef = useRef(savings);
+  savingsRef.current = savings;
+  const [transferSaveDraft, setTransferSaveDraft] = useState<string | null>(null);
+  const [transferSaveDDraft, setTransferSaveDDraft] = useState<string | null>(null);
+  const [prevSaveDraft, setPrevSaveDraft] = useState<string | null>(null);
+  const [prevSaveDDraft, setPrevSaveDDraft] = useState<string | null>(null);
+  const [isEditingPrevBalances, setIsEditingPrevBalances] = useState(false);
+  const savingsDirtyRef = useRef(false);
+  const savingsSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear temporary transfer drafts whenever user navigates to a different month
+  useEffect(() => {
+    setTransferSaveDraft(null);
+    setTransferSaveDDraft(null);
+  }, [selectedYear, selectedMonth]);
 
   // POS Sale Inspection Modal
   const [inspectedSale, setInspectedSale] = useState<POSSaleRecord | null>(null);
@@ -480,6 +508,7 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
     setRows(StorageService.getReportRows());
     setExpenses(StorageService.getExpenses());
     setPosSales(StorageService.getSales());
+    setSavings(StorageService.getReportSavings());
 
     // Real-time Cloud listeners across Chrome, Firefox, Netlify, and Mobile
     const unsubRows = StorageService.subscribeToReportRows((cloudRows) => {
@@ -505,11 +534,21 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
       setPosSales(cloudSales);
     });
 
+    const unsubSavings = StorageService.subscribeToReportSavings((cloudSavings) => {
+      if (!savingsDirtyRef.current) {
+        setSavings(cloudSavings);
+      }
+    });
+
     return () => {
       unsubRows();
       unsubExpenses();
       unsubSales();
+      unsubSavings();
       Object.values(expenseSaveTimersRef.current).forEach((timer) => clearTimeout(timer));
+      if (savingsSaveTimerRef.current) {
+        clearTimeout(savingsSaveTimerRef.current);
+      }
     };
   }, []);
 
@@ -552,6 +591,37 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
   const totalProfitAfterExpense = useMemo(() => {
     return totalPrice - totalExpense;
   }, [totalPrice, totalExpense]);
+
+  // Active month savings summary (Auto carry-forward across months)
+  const activeMonthSavings = useMemo(() => {
+    return getMonthlySavingsSummary(savings, selectedYear, selectedMonth);
+  }, [savings, selectedYear, selectedMonth]);
+
+  // 6. Profit After Transfer: =U6 - U10 - U11
+  const profitAfterTransfer = useMemo(() => {
+    return (
+      totalProfitAfterExpense -
+      activeMonthSavings.transferToSave -
+      activeMonthSavings.transferToSaveD
+    );
+  }, [totalProfitAfterExpense, activeMonthSavings.transferToSave, activeMonthSavings.transferToSaveD]);
+
+  // 7. Save = Previous Month Save + U10 (Auto carried forward across months, baseline 5565)
+  const saveBalance = activeMonthSavings.endingSave;
+
+  // 8. Save D = Previous Month Save D + U11 (Auto carried forward across months, baseline 1435)
+  const saveDBalance = activeMonthSavings.endingSaveD;
+
+  // 9. Total = U14 + U15 (Save + Save D)
+  const grandSavingsTotal = activeMonthSavings.totalSavings;
+
+  const formatUsd = (val: number) => {
+    const absStr = Math.abs(val).toLocaleString('en-US', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    });
+    return `${val < 0 ? '-' : ''}$${absStr}`;
+  };
 
   // Days in selected month
   const daysInMonth = useMemo(() => {
@@ -829,6 +899,100 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
     onShowToast?.('បានលុបចំណាយរួចរាល់', 'info');
   };
 
+  // ================= TRANSFER & SAVINGS ACTIONS =================
+  const flushSavingsUpdate = (nextConfig: ReportSavingsConfig) => {
+    StorageService.saveReportSavings(nextConfig);
+    setTimeout(() => {
+      savingsDirtyRef.current = false;
+    }, 500);
+  };
+
+  const buildNextSavingsConfig = (
+    field: 'transferToSave' | 'transferToSaveD' | 'prevSave' | 'prevSaveD',
+    numericVal: number
+  ): ReportSavingsConfig => {
+    const current = savingsRef.current;
+    if (field === 'prevSave' || field === 'prevSaveD') {
+      return {
+        ...current,
+        [field]: numericVal,
+      };
+    }
+    const monthKey = activeMonthSavings.monthKey;
+    const prevMap = current.monthlyTransfers || {};
+    const existingEntry = prevMap[monthKey] || {
+      transferToSave: 0,
+      transferToSaveD: 0,
+    };
+    const updatedEntry = {
+      ...existingEntry,
+      [field]: numericVal,
+      updatedAt: new Date().toISOString(),
+    };
+    return {
+      ...current,
+      transferToSave: updatedEntry.transferToSave,
+      transferToSaveD: updatedEntry.transferToSaveD,
+      monthlyTransfers: {
+        ...prevMap,
+        [monthKey]: updatedEntry,
+      },
+    };
+  };
+
+  const handleUpdateSavingsField = (
+    field: 'transferToSave' | 'transferToSaveD' | 'prevSave' | 'prevSaveD',
+    rawStr: string,
+    setDraft: React.Dispatch<React.SetStateAction<string | null>>
+  ) => {
+    savingsDirtyRef.current = true;
+    setDraft(rawStr);
+    const parsed = parseFloat(rawStr);
+    const numericVal = isNaN(parsed) ? 0 : parsed;
+    const nextConfig = buildNextSavingsConfig(field, numericVal);
+    setSavings(nextConfig);
+
+    if (savingsSaveTimerRef.current) {
+      clearTimeout(savingsSaveTimerRef.current);
+    }
+    savingsSaveTimerRef.current = setTimeout(() => {
+      savingsSaveTimerRef.current = null;
+      flushSavingsUpdate(nextConfig);
+    }, 350);
+  };
+
+  const handleBlurSavingsField = (
+    field: 'transferToSave' | 'transferToSaveD' | 'prevSave' | 'prevSaveD',
+    draft: string | null,
+    setDraft: React.Dispatch<React.SetStateAction<string | null>>
+  ) => {
+    if (savingsSaveTimerRef.current) {
+      clearTimeout(savingsSaveTimerRef.current);
+      savingsSaveTimerRef.current = null;
+    }
+    if (draft !== null) {
+      const parsed = parseFloat(draft);
+      const numericVal = isNaN(parsed) ? 0 : parsed;
+      const nextConfig = buildNextSavingsConfig(field, numericVal);
+      setSavings(nextConfig);
+      flushSavingsUpdate(nextConfig);
+      setDraft(null);
+    }
+  };
+
+  const handleResetPrevSavingsDefaults = () => {
+    const nextConfig: ReportSavingsConfig = {
+      ...savingsRef.current,
+      prevSave: DEFAULT_REPORT_SAVINGS.prevSave,
+      prevSaveD: DEFAULT_REPORT_SAVINGS.prevSaveD,
+    };
+    setPrevSaveDraft(null);
+    setPrevSaveDDraft(null);
+    setSavings(nextConfig);
+    StorageService.saveReportSavings(nextConfig);
+    onShowToast?.('បានកំណត់ប្រាក់ខែមុនត្រឡប់ទៅ $5,565 & $1,435 វិញ!', 'info');
+  };
+
   // Export Live Ledger to CSV
   const handleExportCsv = () => {
     let csv = 'Game Name,Category,Buy-in,Sell-out,Profit,Date,Source,ReceiptNo\n';
@@ -840,6 +1004,8 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
       csv += `"${e.name}",${e.price}\n`;
     });
     csv += `\nTotal Cost,${totalCost}\nTotal Price,${totalPrice}\nTotal Profit,${totalProfit}\nTotal Expense,${totalExpense}\nTotal Profit After Expense,${totalProfitAfterExpense}\n`;
+    csv += `Month,${monthNames[selectedMonth]} ${selectedYear}\nTransfer to save,${activeMonthSavings.transferToSave}\nTransfer to save D,${activeMonthSavings.transferToSaveD}\nProfit After Transfer,${profitAfterTransfer}\n`;
+    csv += `Opening Save (Prev Month),${activeMonthSavings.openingSave}\nOpening Save D (Prev Month),${activeMonthSavings.openingSaveD}\nSave,${saveBalance}\nSave D,${saveDBalance}\nTotal,${grandSavingsTotal}\n`;
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -1705,7 +1871,7 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
             </div>
           </div>
 
-          {/* ================= UNDER LEDGER: TOTAL EVERY DAY ON LEFT (Cols I - O), EXPENSE & TOTAL ON RIGHT (Cols Q - R, T - U) ================= */}
+          {/* ================= UNDER LEDGER: TOTAL EVERY DAY ON LEFT (Cols I - O) & EXPENSE ON RIGHT (Cols Q - R) ================= */}
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-5 items-start">
             {/* LEFT: TOTAL EVERY DAY 7-DAY CALENDAR MATRIX (Cols I - O) */}
             <div className="xl:col-span-7 2xl:col-span-7 bg-[#0f1422] rounded-xl border border-gray-800 overflow-hidden shadow-lg">
@@ -1884,99 +2050,399 @@ export const DailyFinancialReport: React.FC<DailyFinancialReportProps> = ({
                   </table>
                 </div>
               </div>
+            </div>
+          </div>
 
-              {/* ===== TOTAL SUMMARY ROWS (Cols T - U) ===== */}
-              <div className="bg-[#0f1422] rounded-xl border border-gray-800 overflow-hidden shadow-lg flex flex-col">
-                <div className="bg-[#1b4332] text-white px-3 py-2 flex items-center justify-between font-bold text-xs uppercase tracking-wider">
-                  <div className="flex items-center gap-1.5">
-                    <i className="fa-solid fa-calculator text-emerald-300 text-xs"></i>
-                    <span>Total (Cols T - U)</span>
+          {/* ================= UNDER TOTAL EVERY DAY: TOTAL (Cols T - U) | TRANSFER | SAVE & TOTAL ================= */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-stretch">
+            {/* COL 1: TOTAL SUMMARY ROWS (Cols T - U) */}
+            <div className="bg-[#0f1422] rounded-xl border border-gray-800 overflow-hidden shadow-lg flex flex-col">
+              <div className="bg-[#1b4332] text-white px-3 h-9 flex items-center justify-between gap-2 font-bold text-xs uppercase tracking-wider shrink-0">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <i className="fa-solid fa-calculator text-emerald-300 text-xs shrink-0"></i>
+                  <span className="truncate">Total (Cols T - U)</span>
+                </div>
+                <span className="text-[10px] font-mono text-emerald-200 whitespace-nowrap shrink-0">
+                  Formulas
+                </span>
+              </div>
+
+              <div className="p-3 flex flex-col gap-2 flex-1">
+                {/* Row 1: Total Cost */}
+                <div
+                  onClick={() => setActiveFormula('=SUMIFS(C:C, B:B, "Product")')}
+                  className="flex items-center justify-between gap-2 px-2.5 py-2 min-h-[50px] rounded-lg bg-[#141b2c] hover:bg-white/[0.04] transition cursor-pointer border border-gray-800"
+                >
+                  <div className="min-w-0">
+                    <span className={`font-bold ${sizeConfig.totalTitle} text-gray-300 block truncate`}>Total cost</span>
+                    <p className="text-[9px] text-gray-500 font-mono truncate">
+                      =SUMIFS(C:C, B:B, V1)
+                    </p>
                   </div>
-                  <span className="text-[10px] font-mono text-emerald-200">
-                    Formulas
+                  <span className={`font-orbitron font-bold ${sizeConfig.totalText} text-white whitespace-nowrap shrink-0`}>
+                    {formatUsd(totalCost)}
                   </span>
                 </div>
 
-                <div className="p-3 space-y-2 flex-1 flex flex-col justify-between">
-                  {/* Row 1: Total Cost */}
-                  <div
-                    onClick={() => setActiveFormula('=SUMIFS(C:C, B:B, "Product")')}
-                    className="flex items-center justify-between p-2 rounded-lg bg-[#141b2c] hover:bg-white/[0.04] transition cursor-pointer border border-gray-800"
-                  >
-                    <div>
-                      <span className={`font-bold ${sizeConfig.totalTitle} text-gray-300`}>Total cost</span>
-                      <p className="text-[9px] text-gray-500 font-mono">
-                        =SUMIFS(C:C, B:B, V1)
-                      </p>
-                    </div>
-                    <span className={`font-orbitron font-bold ${sizeConfig.totalText} text-white`}>
-                      ${totalCost.toFixed(2)}
-                    </span>
+                {/* Row 2: Total Price */}
+                <div
+                  onClick={() =>
+                    setActiveFormula(
+                      '=SUMIFS(E:E, B:B, "Steam offline") + SUMIFS(D:D, B:B, "Product")'
+                    )
+                  }
+                  className="flex items-center justify-between gap-2 px-2.5 py-2 min-h-[50px] rounded-lg bg-[#141b2c] hover:bg-white/[0.04] transition cursor-pointer border border-gray-800"
+                >
+                  <div className="min-w-0">
+                    <span className={`font-bold ${sizeConfig.totalTitle} text-gray-300 block truncate`}>Total price</span>
+                    <p className="text-[9px] text-gray-500 font-mono truncate">
+                      =Steam profit + Product sell
+                    </p>
                   </div>
+                  <span className={`font-orbitron font-bold ${sizeConfig.totalText} text-cyan-300 whitespace-nowrap shrink-0`}>
+                    {formatUsd(totalPrice)}
+                  </span>
+                </div>
 
-                  {/* Row 2: Total Price */}
-                  <div
-                    onClick={() =>
-                      setActiveFormula(
-                        '=SUMIFS(E:E, B:B, "Steam offline") + SUMIFS(D:D, B:B, "Product")'
-                      )
-                    }
-                    className="flex items-center justify-between p-2 rounded-lg bg-[#141b2c] hover:bg-white/[0.04] transition cursor-pointer border border-gray-800"
-                  >
-                    <div>
-                      <span className={`font-bold ${sizeConfig.totalTitle} text-gray-300`}>Total price</span>
-                      <p className="text-[9px] text-gray-500 font-mono">
-                        =Steam profit + Product sell
-                      </p>
-                    </div>
-                    <span className={`font-orbitron font-bold ${sizeConfig.totalText} text-cyan-300`}>
-                      ${totalPrice.toFixed(2)}
-                    </span>
+                {/* Row 3: Total Profit */}
+                <div
+                  onClick={() => setActiveFormula('=SUM(E:E)')}
+                  className="flex items-center justify-between gap-2 px-2.5 py-2 min-h-[50px] rounded-lg bg-blue-950/40 hover:bg-blue-950/60 transition cursor-pointer border border-blue-500/30"
+                >
+                  <div className="min-w-0">
+                    <span className={`font-bold ${sizeConfig.totalTitle} text-blue-300 block truncate`}>Total profit</span>
+                    <p className="text-[9px] text-blue-400 font-mono truncate">=SUM(E:E)</p>
                   </div>
+                  <span className={`font-orbitron font-extrabold ${sizeConfig.totalText} text-blue-400 whitespace-nowrap shrink-0`}>
+                    {formatUsd(totalProfit)}
+                  </span>
+                </div>
 
-                  {/* Row 3: Total Profit */}
-                  <div
-                    onClick={() => setActiveFormula('=SUM(E:E)')}
-                    className="flex items-center justify-between p-2 rounded-lg bg-blue-950/40 hover:bg-blue-950/60 transition cursor-pointer border border-blue-500/30"
-                  >
-                    <div>
-                      <span className={`font-bold ${sizeConfig.totalTitle} text-blue-300`}>Total profit</span>
-                      <p className="text-[9px] text-blue-400 font-mono">=SUM(E:E)</p>
-                    </div>
-                    <span className={`font-orbitron font-extrabold ${sizeConfig.totalText} text-blue-400`}>
-                      ${totalProfit.toFixed(2)}
-                    </span>
+                {/* Row 4: Total Expense */}
+                <div
+                  onClick={() => setActiveFormula('=SUM(R:R)')}
+                  className="flex items-center justify-between gap-2 px-2.5 py-2 min-h-[50px] rounded-lg bg-[#141b2c] hover:bg-white/[0.04] transition cursor-pointer border border-gray-800"
+                >
+                  <div className="min-w-0">
+                    <span className={`font-bold ${sizeConfig.totalTitle} text-gray-300 block truncate`}>Total Expense</span>
+                    <p className="text-[9px] text-gray-500 font-mono truncate">=SUM(R:R)</p>
                   </div>
+                  <span className={`font-orbitron font-bold ${sizeConfig.totalText} text-rose-300 whitespace-nowrap shrink-0`}>
+                    {formatUsd(totalExpense)}
+                  </span>
+                </div>
 
-                  {/* Row 4: Total Expense */}
-                  <div
-                    onClick={() => setActiveFormula('=SUM(R:R)')}
-                    className="flex items-center justify-between p-2 rounded-lg bg-[#141b2c] hover:bg-white/[0.04] transition cursor-pointer border border-gray-800"
-                  >
-                    <div>
-                      <span className={`font-bold ${sizeConfig.totalTitle} text-gray-300`}>Total Expense</span>
-                      <p className="text-[9px] text-gray-500 font-mono">=SUM(R:R)</p>
-                    </div>
-                    <span className={`font-orbitron font-bold ${sizeConfig.totalText} text-rose-300`}>
-                      ${totalExpense.toFixed(2)}
+                {/* Row 5: Total Profit After Expense */}
+                <div
+                  onClick={() => setActiveFormula(`=U3 - U5 = ${formatUsd(totalProfitAfterExpense)}`)}
+                  className="flex items-center justify-between gap-2 px-2.5 py-2 min-h-[50px] rounded-lg bg-emerald-950/50 hover:bg-emerald-950/70 transition cursor-pointer border border-emerald-500/40"
+                >
+                  <div className="min-w-0">
+                    <span className={`font-bold ${sizeConfig.totalTitle} text-emerald-300 block truncate`}>
+                      Total Profit After Expense
                     </span>
+                    <p className="text-[9px] text-emerald-400 font-mono truncate">=U3 - U5 (U6)</p>
                   </div>
+                  <span className={`font-orbitron font-extrabold ${sizeConfig.totalText} text-emerald-400 whitespace-nowrap shrink-0`}>
+                    {formatUsd(totalProfitAfterExpense)}
+                  </span>
+                </div>
+              </div>
+            </div>
 
-                  {/* Row 5: Total Profit After Expense */}
-                  <div
-                    onClick={() => setActiveFormula('=U3 - U5')}
-                    className="flex items-center justify-between p-2.5 rounded-lg bg-emerald-950/50 hover:bg-emerald-950/70 transition cursor-pointer border border-emerald-500/40"
+            {/* COL 2: TRANSFER CARD (Cols T - U: U10 - U12) */}
+            <div className="bg-[#0f1422] rounded-xl border border-gray-800 overflow-hidden shadow-lg flex flex-col">
+              <div className="bg-[#1b4332] text-white px-3 h-9 flex items-center justify-between gap-2 font-bold text-xs uppercase tracking-wider shrink-0">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <i className="fa-solid fa-money-bill-transfer text-emerald-300 text-xs shrink-0"></i>
+                  <span className="truncate">Transfer ({monthNames[selectedMonth]} {selectedYear})</span>
+                </div>
+                <span className="text-[10px] font-mono text-emerald-200 whitespace-nowrap shrink-0">
+                  Manual Input
+                </span>
+              </div>
+
+              <div className="p-3 flex flex-col gap-2 flex-1">
+                {/* Row U10: Transfer to save (manual insert) */}
+                <div
+                  onClick={() =>
+                    setActiveFormula(
+                      `U10 Transfer to save (${monthNames[selectedMonth]} ${selectedYear}) = ${formatUsd(activeMonthSavings.transferToSave)} (Insert by yourself)`
+                    )
+                  }
+                  className="flex items-center justify-between gap-2 px-2.5 py-2 min-h-[50px] rounded-lg bg-[#141b2c] hover:bg-white/[0.04] transition cursor-pointer border border-gray-800"
+                >
+                  <div className="min-w-0">
+                    <span className={`font-bold ${sizeConfig.totalTitle} text-gray-200 block truncate`}>
+                      Transfer to save
+                    </span>
+                    <p className="text-[9px] text-gray-500 font-mono truncate">
+                      U10 (Insert by yourself)
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <span className="text-xs font-mono text-blue-400 font-bold">$</span>
+                    <input
+                      type="number"
+                      step="any"
+                      value={
+                        transferSaveDraft !== null
+                          ? transferSaveDraft
+                          : activeMonthSavings.transferToSave
+                          ? String(activeMonthSavings.transferToSave)
+                          : ''
+                      }
+                      placeholder="0.00"
+                      onFocus={() =>
+                        setActiveFormula(
+                          `U10 Transfer to save (${monthNames[selectedMonth]} ${selectedYear}) = ${formatUsd(activeMonthSavings.transferToSave)} (Insert by yourself)`
+                        )
+                      }
+                      onChange={(e) =>
+                        handleUpdateSavingsField('transferToSave', e.target.value, setTransferSaveDraft)
+                      }
+                      onBlur={() =>
+                        handleBlurSavingsField('transferToSave', transferSaveDraft, setTransferSaveDraft)
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          (e.currentTarget as HTMLInputElement).blur();
+                        }
+                      }}
+                      className={`w-24 bg-[#0b101b] text-right font-orbitron font-bold text-blue-400 px-2 py-1 rounded border border-gray-700 focus:border-blue-400 outline-none ${sizeConfig.totalText}`}
+                    />
+                  </div>
+                </div>
+
+                {/* Row U11: Transfer to save D (manual insert) */}
+                <div
+                  onClick={() =>
+                    setActiveFormula(
+                      `U11 Transfer to save D (${monthNames[selectedMonth]} ${selectedYear}) = ${formatUsd(activeMonthSavings.transferToSaveD)} (Insert by yourself)`
+                    )
+                  }
+                  className="flex items-center justify-between gap-2 px-2.5 py-2 min-h-[50px] rounded-lg bg-[#141b2c] hover:bg-white/[0.04] transition cursor-pointer border border-gray-800"
+                >
+                  <div className="min-w-0">
+                    <span className={`font-bold ${sizeConfig.totalTitle} text-gray-200 block truncate`}>
+                      Transfer to save D
+                    </span>
+                    <p className="text-[9px] text-gray-500 font-mono truncate">
+                      U11 (Insert by yourself)
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <span className="text-xs font-mono text-blue-400 font-bold">$</span>
+                    <input
+                      type="number"
+                      step="any"
+                      value={
+                        transferSaveDDraft !== null
+                          ? transferSaveDDraft
+                          : activeMonthSavings.transferToSaveD
+                          ? String(activeMonthSavings.transferToSaveD)
+                          : ''
+                      }
+                      placeholder="0.00"
+                      onFocus={() =>
+                        setActiveFormula(
+                          `U11 Transfer to save D (${monthNames[selectedMonth]} ${selectedYear}) = ${formatUsd(activeMonthSavings.transferToSaveD)} (Insert by yourself)`
+                        )
+                      }
+                      onChange={(e) =>
+                        handleUpdateSavingsField('transferToSaveD', e.target.value, setTransferSaveDDraft)
+                      }
+                      onBlur={() =>
+                        handleBlurSavingsField('transferToSaveD', transferSaveDDraft, setTransferSaveDDraft)
+                      }
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          (e.currentTarget as HTMLInputElement).blur();
+                        }
+                      }}
+                      className={`w-24 bg-[#0b101b] text-right font-orbitron font-bold text-blue-400 px-2 py-1 rounded border border-gray-700 focus:border-blue-400 outline-none ${sizeConfig.totalText}`}
+                    />
+                  </div>
+                </div>
+
+                {/* Row U12: Profit After Transfer = U6 - U10 - U11 */}
+                <div
+                  onClick={() =>
+                    setActiveFormula(
+                      `=U6 - U10 - U11 (${formatUsd(totalProfitAfterExpense)} - ${formatUsd(activeMonthSavings.transferToSave)} - ${formatUsd(activeMonthSavings.transferToSaveD)} = ${formatUsd(profitAfterTransfer)})`
+                    )
+                  }
+                  className={`flex items-center justify-between gap-2 px-2.5 py-2 min-h-[50px] rounded-lg transition cursor-pointer border ${
+                    profitAfterTransfer >= 0
+                      ? 'bg-blue-950/45 hover:bg-blue-950/65 border-blue-500/40'
+                      : 'bg-rose-950/45 hover:bg-rose-950/65 border-rose-500/40'
+                  }`}
+                >
+                  <div className="min-w-0">
+                    <span
+                      className={`font-bold ${sizeConfig.totalTitle} block truncate ${
+                        profitAfterTransfer >= 0 ? 'text-blue-300' : 'text-rose-300'
+                      }`}
+                    >
+                      Profit After Transfer
+                    </span>
+                    <p
+                      className={`text-[9px] font-mono truncate ${
+                        profitAfterTransfer >= 0 ? 'text-blue-400' : 'text-rose-400'
+                      }`}
+                    >
+                      =U6 - U10 - U11
+                    </p>
+                  </div>
+                  <span
+                    className={`font-orbitron font-extrabold ${sizeConfig.totalText} whitespace-nowrap shrink-0 ${
+                      profitAfterTransfer >= 0 ? 'text-blue-400' : 'text-rose-400'
+                    }`}
                   >
-                    <div>
-                      <span className={`font-bold ${sizeConfig.totalTitle} text-emerald-300`}>
-                        Total Profit After Expense
+                    {formatUsd(profitAfterTransfer)}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* COL 3: SAVE & GRAND TOTAL CARD (Cols T - U: U14 - U16) */}
+            <div className="bg-[#0f1422] rounded-xl border border-gray-800 overflow-hidden shadow-lg flex flex-col">
+              <div className="bg-[#1b4332] text-white px-3 h-9 flex items-center justify-between gap-2 font-bold text-xs uppercase tracking-wider shrink-0">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <i className="fa-solid fa-piggy-bank text-emerald-300 text-xs shrink-0"></i>
+                  <span className="truncate">Save &amp; Total ({monthNames[selectedMonth]} {selectedYear})</span>
+                  {activeMonthSavings.isAutoCarryForward && (
+                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-200 border border-cyan-400/30 whitespace-nowrap shrink-0">
+                      Auto
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsEditingPrevBalances((v) => !v)}
+                  className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-700/70 hover:bg-emerald-600 text-emerald-100 border border-emerald-400/30 transition cursor-pointer whitespace-nowrap shrink-0"
+                  title="កែសម្រួលប្រាក់សន្សំដើម (Starting Base Balance)"
+                >
+                  {isEditingPrevBalances ? 'រួចរាល់' : 'កែប្រែដើមគ្រា'}
+                </button>
+              </div>
+
+              <div className="p-3 flex flex-col gap-2 flex-1">
+                {/* Optional Base Starting Balance Editor (before Nov 2026) */}
+                {isEditingPrevBalances && (
+                  <div className="p-2.5 rounded-lg bg-[#0b101b] border border-emerald-500/30 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-emerald-300 uppercase tracking-wider">
+                        ប្រាក់ដើមគ្រា ({activeMonthSavings.baseMonthKey})
                       </span>
-                      <p className="text-[9px] text-emerald-400 font-mono">=U3 - U5</p>
+                      <button
+                        type="button"
+                        onClick={handleResetPrevSavingsDefaults}
+                        className="text-[10px] font-mono text-gray-400 hover:text-emerald-300 underline cursor-pointer"
+                      >
+                        Reset 5,565 / 1,435
+                      </button>
                     </div>
-                    <span className={`font-orbitron font-extrabold ${sizeConfig.totalText} text-emerald-400`}>
-                      ${totalProfitAfterExpense.toFixed(2)}
-                    </span>
+                    <p className="text-[10px] text-gray-400 font-rajdhani">
+                      ខែក្រោយៗនឹងទាញយកសមតុល្យចុងក្រោយពីខែមុនមកបូកបន្តដោយស្វ័យប្រវត្តិ (Auto Carry Forward)។
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="block text-[9px] text-gray-400 font-mono mb-0.5">
+                          Save ដើមគ្រា
+                        </label>
+                        <input
+                          type="number"
+                          step="any"
+                          value={prevSaveDraft !== null ? prevSaveDraft : String(savings.prevSave)}
+                          onChange={(e) =>
+                            handleUpdateSavingsField('prevSave', e.target.value, setPrevSaveDraft)
+                          }
+                          onBlur={() =>
+                            handleBlurSavingsField('prevSave', prevSaveDraft, setPrevSaveDraft)
+                          }
+                          className="w-full bg-[#141b2c] text-right font-mono text-xs text-emerald-300 px-2 py-1 rounded border border-gray-700 focus:border-emerald-400 outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[9px] text-gray-400 font-mono mb-0.5">
+                          Save D ដើមគ្រា
+                        </label>
+                        <input
+                          type="number"
+                          step="any"
+                          value={prevSaveDDraft !== null ? prevSaveDDraft : String(savings.prevSaveD)}
+                          onChange={(e) =>
+                            handleUpdateSavingsField('prevSaveD', e.target.value, setPrevSaveDDraft)
+                          }
+                          onBlur={() =>
+                            handleBlurSavingsField('prevSaveD', prevSaveDDraft, setPrevSaveDDraft)
+                          }
+                          className="w-full bg-[#141b2c] text-right font-mono text-xs text-emerald-300 px-2 py-1 rounded border border-gray-700 focus:border-emerald-400 outline-none"
+                        />
+                      </div>
+                    </div>
                   </div>
+                )}
+
+                {/* Row U14: Save = openingSave + U10 */}
+                <div
+                  onClick={() =>
+                    setActiveFormula(
+                      `=${activeMonthSavings.openingSave} + U10 (${formatUsd(activeMonthSavings.openingSave)} ${activeMonthSavings.isAutoCarryForward ? 'Auto ពីខែមុន' : 'ខែមុន'} + ${formatUsd(activeMonthSavings.transferToSave)} = ${formatUsd(saveBalance)})`
+                    )
+                  }
+                  className="flex items-center justify-between gap-2 px-2.5 py-2 min-h-[50px] rounded-lg bg-[#141b2c] hover:bg-white/[0.04] transition cursor-pointer border border-gray-800"
+                >
+                  <div className="min-w-0">
+                    <span className={`font-bold ${sizeConfig.totalTitle} text-gray-200 block truncate`}>Save</span>
+                    <p className="text-[9px] text-gray-500 font-mono truncate">
+                      ={activeMonthSavings.openingSave.toLocaleString('en-US')}+U10 ({activeMonthSavings.isAutoCarryForward ? 'Auto ពីខែមុន' : 'ខែមុន'})
+                    </p>
+                  </div>
+                  <span className={`font-orbitron font-bold ${sizeConfig.totalText} text-blue-400 whitespace-nowrap shrink-0`}>
+                    {formatUsd(saveBalance)}
+                  </span>
+                </div>
+
+                {/* Row U15: Save D = openingSaveD + U11 */}
+                <div
+                  onClick={() =>
+                    setActiveFormula(
+                      `=${activeMonthSavings.openingSaveD} + U11 (${formatUsd(activeMonthSavings.openingSaveD)} ${activeMonthSavings.isAutoCarryForward ? 'Auto ពីខែមុន' : 'ខែមុន'} + ${formatUsd(activeMonthSavings.transferToSaveD)} = ${formatUsd(saveDBalance)})`
+                    )
+                  }
+                  className="flex items-center justify-between gap-2 px-2.5 py-2 min-h-[50px] rounded-lg bg-[#141b2c] hover:bg-white/[0.04] transition cursor-pointer border border-gray-800"
+                >
+                  <div className="min-w-0">
+                    <span className={`font-bold ${sizeConfig.totalTitle} text-gray-200 block truncate`}>Save D</span>
+                    <p className="text-[9px] text-gray-500 font-mono truncate">
+                      ={activeMonthSavings.openingSaveD.toLocaleString('en-US')}+U11 ({activeMonthSavings.isAutoCarryForward ? 'Auto ពីខែមុន' : 'ខែមុន'})
+                    </p>
+                  </div>
+                  <span className={`font-orbitron font-bold ${sizeConfig.totalText} text-blue-400 whitespace-nowrap shrink-0`}>
+                    {formatUsd(saveDBalance)}
+                  </span>
+                </div>
+
+                {/* Row U16: Total = U14 + U15 */}
+                <div
+                  onClick={() =>
+                    setActiveFormula(
+                      `=U14 + U15 (${formatUsd(saveBalance)} + ${formatUsd(saveDBalance)} = ${formatUsd(grandSavingsTotal)})`
+                    )
+                  }
+                  className="flex items-center justify-between gap-2 px-2.5 py-2 min-h-[50px] rounded-lg bg-blue-950/50 hover:bg-blue-950/70 transition cursor-pointer border border-blue-500/45"
+                >
+                  <div className="min-w-0">
+                    <span className={`font-bold ${sizeConfig.totalTitle} text-blue-200 block truncate`}>
+                      Total
+                    </span>
+                    <p className="text-[9px] text-blue-400 font-mono truncate">=U14 + U15</p>
+                  </div>
+                  <span className={`font-orbitron font-extrabold ${sizeConfig.totalText} text-blue-300 whitespace-nowrap shrink-0`}>
+                    {formatUsd(grandSavingsTotal)}
+                  </span>
                 </div>
               </div>
             </div>
