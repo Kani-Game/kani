@@ -624,12 +624,21 @@ async function startServer() {
   } else {
     const distDir = path.resolve(__dirname, 'dist');
     if (fs.existsSync(distDir)) {
-      app.use(express.static(distDir));
+      app.use(
+        express.static(distDir, {
+          setHeaders: (res, filePath) => {
+            if (filePath.endsWith('index.html')) {
+              res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            }
+          },
+        })
+      );
       app.get('*', (req: Request, res: Response, next) => {
         if (req.path.startsWith('/api/')) {
           next();
           return;
         }
+        res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
         res.sendFile(path.join(distDir, 'index.html'));
       });
     }

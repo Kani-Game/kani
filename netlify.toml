@@ -2,6 +2,14 @@
   command = "npm run build"
   publish = "dist"
 
+[build.environment]
+  BUN_FLAGS = "--no-frozen-lockfile"
+
+[[headers]]
+  for = "/index.html"
+  [headers.values]
+    Cache-Control = "no-cache, no-store, must-revalidate"
+
 [[redirects]]
   from = "/api/steam-spec"
   to = "/.netlify/functions/steam-spec"
