@@ -16,6 +16,11 @@
   status = 200
 
 [[redirects]]
+  from = "/api/steam-online-games"
+  to = "/.netlify/functions/steam-online-feed"
+  status = 200
+
+[[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200

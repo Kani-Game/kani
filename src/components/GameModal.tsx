@@ -5,6 +5,7 @@ import {
   SteamRequirementBlock,
   SteamSpecResponse,
 } from '../services/steamService';
+import { computeSteamOnlinePricing } from '../utils/pricingUtils';
 
 interface GameModalProps {
   game: Game | null;
@@ -15,6 +16,7 @@ interface GameModalProps {
   onSendToTelegram?: (game: Game) => void;
   onSelectGenre?: (genre: string) => void;
   onSaveGameSpec?: (game: Game, spec: SteamSpecResponse) => void;
+  steamOnlineDiscountPercent?: number;
 }
 
 function getHardwareIconClass(label: string): string {
@@ -123,6 +125,7 @@ export const GameModal: React.FC<GameModalProps> = ({
   onSendToTelegram,
   onSelectGenre,
   onSaveGameSpec,
+  steamOnlineDiscountPercent = 0,
 }) => {
   const [imgError, setImgError] = useState(false);
   const [steamSpec, setSteamSpec] = useState<SteamSpecResponse | null>(null);
@@ -130,6 +133,9 @@ export const GameModal: React.FC<GameModalProps> = ({
   const [specError, setSpecError] = useState<string | null>(null);
 
   const isProduct = Boolean(game?.tag.toLowerCase().includes('product'));
+  const isSteamOnline = Boolean(
+    game?.tag.toLowerCase().includes('steam') && game?.tag.toLowerCase().includes('online')
+  );
   const isSteamSkipped = Boolean(game?.skipSteamLink);
 
   const loadSpecs = useCallback(
@@ -275,13 +281,61 @@ export const GameModal: React.FC<GameModalProps> = ({
                       </span>
                     )}
                   </div>
-                ) : (
-                  game.barcode && (
-                    <p className="mt-2 text-xs text-gray-400 font-mono">
-                      SKU: {game.barcode}
-                    </p>
-                  )
-                )}
+                  ) : (
+                    game.barcode && (
+                      <p className="mt-2 text-xs text-gray-400 font-mono">
+                        SKU: {game.barcode}
+                      </p>
+                    )
+                  )}
+
+                  {isSteamOnline && (() => {
+                    const pricing = computeSteamOnlinePricing(game, steamOnlineDiscountPercent);
+                    if (pricing.steamOriginalPrice === undefined) return null;
+                    return (
+                      <div className="mt-3 inline-flex items-center rounded-xl overflow-hidden bg-[#0a101b] border border-slate-700/80 tabular-nums px-2 py-1.5 gap-3">
+                        {pricing.hasDiscount ? (
+                          <div className="flex items-stretch shrink-0">
+                            <div className="px-2 py-1 bg-gradient-to-b from-[#0ea5e9] to-[#0077e6] -skew-x-12 flex items-center rounded-l-[3px]">
+                              <span className="skew-x-12 text-white font-sans font-extrabold text-[11px] leading-none">
+                                Up to
+                              </span>
+                            </div>
+                            <div className="px-2.5 py-1 bg-gradient-to-b from-[#ff6a13] to-[#ea4200] -skew-x-12 -ml-1 flex items-center rounded-r-[3px]">
+                              <span className="skew-x-12 text-white font-sans font-black text-sm leading-none">
+                                -{pricing.discountPercent}%
+                              </span>
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="px-2.5 py-1 rounded bg-slate-800/90 text-slate-300 font-mono font-bold text-xs">
+                            0% OFF
+                          </span>
+                        )}
+                        <div className="pr-2 flex items-baseline gap-2.5">
+                          {pricing.hasDiscount ? (
+                            <>
+                              <span className="text-xs font-mono text-slate-400 line-through">
+                                Steam ${pricing.steamOriginalPrice.toFixed(2)}
+                              </span>
+                              <span className="text-base font-mono font-extrabold text-white">
+                                ${pricing.finalPrice?.toFixed(2)}
+                              </span>
+                            </>
+                          ) : (
+                            <>
+                              <span className="text-[11px] uppercase tracking-wider text-slate-400 font-semibold">
+                                Steam Full
+                              </span>
+                              <span className="text-base font-mono font-extrabold text-sky-300">
+                                ${pricing.steamOriginalPrice.toFixed(2)}
+                              </span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
               </div>
 
               {/* Action Buttons */}

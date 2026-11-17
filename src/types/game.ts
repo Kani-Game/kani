@@ -38,6 +38,37 @@ export interface Game {
   costPrice?: number; // Cost price for profit margins
   steamSpec?: SteamSpecData; // Saved PC System Requirements synced from Steam
   skipSteamLink?: boolean; // When true, do not auto-link or auto-fetch Steam Store data by game name
+  steamAppId?: number; // Steam Store App ID when synced or linked from Steam
+  steamPriceUsd?: number; // Original Steam Store USD price (used for Steam Online pricing & discount)
+  discountPercent?: number; // Optional per-game discount % override (0-95)
+}
+
+export type SteamOnlineSyncSource = 'popular_new_online' | 'new_releases_online' | 'top_sellers_online';
+
+export interface SteamOnlineFeedItem {
+  appId: number;
+  name: string;
+  genre: string;
+  img: string;
+  steamUrl: string;
+  releaseDate?: string;
+  steamPriceUsd?: number;
+  isFree?: boolean;
+}
+
+export interface SteamOnlineAutoSyncConfig {
+  enabled: boolean;
+  source: SteamOnlineSyncSource;
+  intervalHours: number;
+  maxGamesPerSync: number;
+  defaultPriceUsd?: number;
+  discountPercent?: number; // Global discount % for Steam Online games (0 - 95)
+  deletedAppIds?: number[];
+  lastSyncAt?: number;
+  lastSyncedCount?: number;
+  lastSyncStatus?: 'idle' | 'syncing' | 'success' | 'error';
+  lastSyncMessage?: string;
+  updatedAt?: string;
 }
 
 export type GameTab = 'steam' | 'steam-online' | 'free' | 'product' | 'all';
@@ -161,6 +192,18 @@ export interface CoverCard {
   price?: number;         // Price in USD e.g. 5.00
 }
 
+export interface SteamOnlineCoverSlide {
+  id: string;
+  mediaType: 'photo' | 'video';
+  mediaUrl: string;
+  title: string;
+  subtitle?: string;
+  ctaLabel?: string;
+  discountPrefix?: string; // Slanted blue tag e.g. 'Up to'
+  discountHighlight?: string; // Slanted orange tag e.g. '-50%'
+  showDiscount?: boolean;
+}
+
 export interface SiteSettings {
   portalTitle: string;
   portalSubtitle: string;
@@ -181,6 +224,7 @@ export interface SiteSettings {
   qrCodeImage?: string; // ABA KHQR / Bakong payment QR code base64 or URL
   qrCodeLabel?: string; // Label for QR code e.g. 'ABA PAY / KHQR'
   coverCards?: CoverCard[]; // Featured cover promo cards at top of storefront
+  steamOnlineCoverSlides?: SteamOnlineCoverSlide[]; // Customizable Steam Online Photo/Video/Text+Discount cover slides
 }
 
 export type UserRole = 'admin' | 'pos';

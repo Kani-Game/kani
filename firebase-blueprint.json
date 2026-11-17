@@ -18,7 +18,8 @@
         "stock": { "type": "number", "description": "Optional inventory count" },
         "createdAt": { "type": "string", "description": "ISO timestamp" },
         "steamSpec": { "type": "object", "description": "Saved Steam PC system requirements and metadata" },
-        "skipSteamLink": { "type": "boolean", "description": "When true, skip automatic Steam Store linking by game name" }
+        "skipSteamLink": { "type": "boolean", "description": "When true, skip automatic Steam Store linking by game name" },
+        "steamAppId": { "type": "number", "description": "Steam Store App ID for auto-synced or linked games" }
       },
       "required": ["name", "tag", "genre", "img"]
     },
@@ -117,6 +118,24 @@
         "monthlyTransfers": { "type": "object" },
         "updatedAt": { "type": "string" }
       }
+    },
+    "SteamOnlineSyncConfig": {
+      "title": "SteamOnlineSyncConfig",
+      "description": "Auto-update configuration and sync history for Steam Online category from Steam Store",
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "source": { "type": "string", "enum": ["popular_new_online", "new_releases_online", "top_sellers_online"] },
+        "intervalHours": { "type": "number" },
+        "maxGamesPerSync": { "type": "number" },
+        "defaultPriceUsd": { "type": "number" },
+        "deletedAppIds": { "type": "array" },
+        "lastSyncAt": { "type": "number" },
+        "lastSyncedCount": { "type": "number" },
+        "lastSyncStatus": { "type": "string" },
+        "lastSyncMessage": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
     }
   },
   "firestore": {
@@ -142,7 +161,7 @@
     },
     "/settings/{settingId}": {
       "schema": { "$ref": "#/entities/SiteSettings" },
-      "description": "Portal, POS, and Financial Report savings configuration settings"
+      "description": "Portal, POS, Financial Report savings, and Steam Online auto-sync configuration settings"
     },
     "/versionHistory/{versionId}": {
       "schema": { "type": "object" },

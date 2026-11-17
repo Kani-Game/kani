@@ -1,21 +1,51 @@
 import { ALL_INITIAL_GAMES, INITIAL_PRODUCTS } from '../data/initialGames';
-import { Game, POSSaleRecord, SiteSettings, DailyReportRow, ExpenseItem, ReportCategory, ReportVersionSnapshot, ReportSavingsConfig, MonthlyTransferEntry, UserAccount, UserAccountsConfig, UserRole, AdminAuth } from '../types/game';
+import { Game, POSSaleRecord, SiteSettings, DailyReportRow, ExpenseItem, ReportCategory, ReportVersionSnapshot, ReportSavingsConfig, MonthlyTransferEntry, UserAccount, UserAccountsConfig, UserRole, AdminAuth, SteamOnlineAutoSyncConfig, SteamOnlineSyncSource } from '../types/game';
 import { collection, doc, setDoc, deleteDoc, onSnapshot, getDoc, getDocs, query, orderBy, writeBatch } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType } from './firebase';
+import { extractSteamAppId, fetchSteamOnlineFeed, fetchSteamPricesBatch } from './steamService';
 
-// Helper to remove undefined fields and convert NaN to 0 because Firestore rejects them
-function cleanFirestoreDoc<T extends Record<string, any>>(obj: T): Record<string, any> {
-  const cleaned: Record<string, any> = {};
-  for (const [key, value] of Object.entries(obj)) {
-    if (value !== undefined) {
-      if (typeof value === 'number') {
-        cleaned[key] = isNaN(value) ? 0 : value;
-      } else {
-        cleaned[key] = value;
+// Helper to recursively remove undefined fields and convert NaN to 0 because Firestore rejects them
+function cleanFirestoreValue(value: any): any {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  if (typeof value === 'number') return isNaN(value) ? 0 : value;
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => cleanFirestoreValue(item))
+      .filter((item) => item !== undefined);
+  }
+  if (typeof value === 'object') {
+    const cleanedObj: Record<string, any> = {};
+    for (const [k, v] of Object.entries(value)) {
+      const cleanedVal = cleanFirestoreValue(v);
+      if (cleanedVal !== undefined) {
+        cleanedObj[k] = cleanedVal;
       }
     }
+    return cleanedObj;
   }
-  return cleaned;
+  return value;
+}
+
+function cleanFirestoreDoc<T extends Record<string, any>>(obj: T): Record<string, any> {
+  return cleanFirestoreValue(obj) as Record<string, any>;
+}
+
+// Guarantees every Game write satisfies firestore.rules (isValidGame) so descriptions never silently fail to persist
+function prepareGameForFirestore(game: Game): Record<string, any> {
+  const safeName = (game.name || 'Untitled Game').trim().slice(0, 300) || 'Untitled Game';
+  const safeTag = (game.tag || 'Steam Offline').trim().slice(0, 100) || 'Steam Offline';
+  const safeGenre = (game.genre || 'General').trim().slice(0, 100) || 'General';
+  const safeImg =
+    (game.img || '').trim() || 'https://placehold.co/600x800/131b2e/ffffff?text=Game';
+  return cleanFirestoreDoc({
+    ...game,
+    id: sanitizeFirestoreId(game.id),
+    name: safeName,
+    tag: safeTag,
+    genre: safeGenre,
+    img: safeImg,
+  });
 }
 
 // Guarantees all IDs strictly match Firestore rules regex '^[a-zA-Z0-9_\-]+$' and length <= 120
@@ -72,6 +102,93 @@ const STORAGE_KEY_EXPENSES = 'kanigame_expenses_v2';
 const STORAGE_KEY_EXPENSES_INITIALIZED = 'kanigame_expenses_initialized_v2';
 const STORAGE_KEY_VERSION_HISTORY = 'kanigame_version_history_v1';
 const STORAGE_KEY_REPORT_SAVINGS = 'kanigame_report_savings_v1';
+const STORAGE_KEY_STEAM_ONLINE_SYNC = 'kanigame_steam_online_sync_v1';
+
+export const DEFAULT_STEAM_ONLINE_SYNC_CONFIG: SteamOnlineAutoSyncConfig = {
+  enabled: true,
+  source: 'popular_new_online',
+  intervalHours: 1,
+  maxGamesPerSync: 30,
+  discountPercent: 0,
+  deletedAppIds: [],
+  lastSyncAt: 0,
+  lastSyncedCount: 0,
+  lastSyncStatus: 'idle',
+  lastSyncMessage: '',
+};
+
+export function normalizeSteamOnlineSyncConfig(raw?: any): SteamOnlineAutoSyncConfig {
+  const source: SteamOnlineSyncSource =
+    raw?.source === 'new_releases_online' || raw?.source === 'top_sellers_online'
+      ? raw.source
+      : 'popular_new_online';
+  const intervalHours =
+    typeof raw?.intervalHours === 'number' && Number.isFinite(raw.intervalHours) && raw.intervalHours >= 1
+      ? Math.min(168, Math.round(raw.intervalHours))
+      : DEFAULT_STEAM_ONLINE_SYNC_CONFIG.intervalHours;
+  const maxGamesPerSync =
+    typeof raw?.maxGamesPerSync === 'number' && Number.isFinite(raw.maxGamesPerSync) && raw.maxGamesPerSync >= 1
+      ? Math.min(50, Math.round(raw.maxGamesPerSync))
+      : DEFAULT_STEAM_ONLINE_SYNC_CONFIG.maxGamesPerSync;
+  const defaultPriceUsd =
+    typeof raw?.defaultPriceUsd === 'number' && Number.isFinite(raw.defaultPriceUsd) && raw.defaultPriceUsd >= 0
+      ? raw.defaultPriceUsd
+      : undefined;
+  const discountPercent =
+    typeof raw?.discountPercent === 'number' && Number.isFinite(raw.discountPercent)
+      ? Math.max(0, Math.min(95, Math.round(raw.discountPercent)))
+      : 0;
+  const deletedAppIds: number[] = Array.isArray(raw?.deletedAppIds)
+    ? Array.from(
+        new Set<number>(
+          raw.deletedAppIds
+            .map((id: unknown) => Number(id))
+            .filter((id: number) => Number.isFinite(id) && id > 0)
+        )
+      ).slice(-500)
+    : [];
+
+  return {
+    enabled: typeof raw?.enabled === 'boolean' ? raw.enabled : true,
+    source,
+    intervalHours,
+    maxGamesPerSync,
+    defaultPriceUsd,
+    discountPercent,
+    deletedAppIds,
+    lastSyncAt: typeof raw?.lastSyncAt === 'number' && Number.isFinite(raw.lastSyncAt) ? raw.lastSyncAt : 0,
+    lastSyncedCount:
+      typeof raw?.lastSyncedCount === 'number' && Number.isFinite(raw.lastSyncedCount)
+        ? raw.lastSyncedCount
+        : 0,
+    lastSyncStatus:
+      raw?.lastSyncStatus === 'syncing' ||
+      raw?.lastSyncStatus === 'success' ||
+      raw?.lastSyncStatus === 'error'
+        ? raw.lastSyncStatus
+        : 'idle',
+    lastSyncMessage: typeof raw?.lastSyncMessage === 'string' ? raw.lastSyncMessage : '',
+    updatedAt: typeof raw?.updatedAt === 'string' ? raw.updatedAt : undefined,
+  };
+}
+
+let inFlightSteamOnlineSync: Promise<{
+  skipped?: boolean;
+  addedCount: number;
+  addedGames: Game[];
+  feedGames?: Array<{
+    appId: number;
+    name: string;
+    genre: string;
+    img: string;
+    steamPriceUsd: number;
+    releaseDate?: string;
+    steamUrl?: string;
+    status: 'added' | 'exists' | 'skipped';
+  }>;
+  config: SteamOnlineAutoSyncConfig;
+  error?: string;
+}> | null = null;
 
 export const DEFAULT_BASE_SAVINGS_MONTH = '2026-11';
 
@@ -325,22 +442,46 @@ async function idbSet(key: string, value: any): Promise<void> {
   }
 }
 
+function getGameCategoryBucket(tag?: string): string {
+  const t = (tag || '').trim().toLowerCase();
+  if (t.includes('steam online') || t === 'online') return 'steam_online';
+  if (t.includes('steam offline') || t === 'steam') return 'steam_offline';
+  if (t.includes('product')) return 'product';
+  return 'external_free';
+}
+
+function getGameDedupeKey(g: Pick<Game, 'name' | 'tag'>): string {
+  const normalizedName = (g.name || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[™®©]/g, '')
+    .replace(/\s+/g, ' ');
+  return `${getGameCategoryBucket(g.tag)}::${normalizedName}`;
+}
+
 // In-memory cache for ultra-fast access and memory persistence
 let cachedGames: Game[] | null = null;
 let cachedUserAccounts: UserAccountsConfig | null = null;
+const syncedCodebaseIds = new Set<string>();
+const pendingLocalUpdates = new Map<string, { game: Game; expiresAt: number }>();
 
 export const StorageService = {
-  // Automatically merges latest games added to code (Google AI Studio / GitHub) with locally uploaded items on Netlify
-  mergeWithLatestCodebase(existingGames: Game[]): Game[] {
+  getMissingFromCodebase(existingGames: Game[]): Game[] {
     const existingIds = new Set(existingGames.map((g) => g.id));
-    const existingNames = new Set(existingGames.map((g) => g.name.trim().toLowerCase()));
+    const existingKeys = new Set(existingGames.map((g) => getGameDedupeKey(g)));
 
     const missingFromCodebase: Game[] = [];
     for (const codeGame of ALL_INITIAL_GAMES) {
-      if (!existingIds.has(codeGame.id) && !existingNames.has(codeGame.name.trim().toLowerCase())) {
+      if (!existingIds.has(codeGame.id) && !existingKeys.has(getGameDedupeKey(codeGame))) {
         missingFromCodebase.push(codeGame);
       }
     }
+    return missingFromCodebase;
+  },
+
+  // Automatically merges latest games added to code (Google AI Studio / GitHub) with locally uploaded items on Netlify
+  mergeWithLatestCodebase(existingGames: Game[]): Game[] {
+    const missingFromCodebase = this.getMissingFromCodebase(existingGames);
 
     if (missingFromCodebase.length === 0) {
       return existingGames;
@@ -390,7 +531,12 @@ export const StorageService = {
         try {
           localStorage.setItem(STORAGE_KEY_GAMES, JSON.stringify(merged));
         } catch {
-          // ignore
+          try {
+            const compactForLocalStorage = merged.map(({ steamSpec: _spec, ...rest }) => rest);
+            localStorage.setItem(STORAGE_KEY_GAMES, JSON.stringify(compactForLocalStorage));
+          } catch {
+            // ignore
+          }
         }
         if (onHydrate) {
           onHydrate(merged);
@@ -411,17 +557,23 @@ export const StorageService = {
       console.warn('IndexedDB save warning:', err);
     });
 
-    // 2. Synchronous save to localStorage with graceful fallback
+    // 2. Synchronous save to localStorage with graceful quota fallback (keeping all custom descriptions intact)
     try {
       localStorage.setItem(STORAGE_KEY_GAMES, JSON.stringify(games));
     } catch (e) {
-      console.warn('Storage quota warning on localStorage. Using IndexedDB + memory cache.', e);
+      console.warn('Storage quota warning on localStorage. Compressing localStorage mirror while keeping full data in IndexedDB.', e);
       try {
-        // Try saving without POS sales to free space
-        localStorage.removeItem(STORAGE_KEY_POS_SALES);
-        localStorage.setItem(STORAGE_KEY_GAMES, JSON.stringify(games));
-      } catch (inner) {
-        console.warn('Critical localStorage quota exceeded. Full catalog safely saved in IndexedDB & memory.', inner);
+        // First strip heavy cached steamSpec blobs (already stored in STEAM_SPEC_CACHE_KEY & Firestore /steamSpecs)
+        const compactForLocalStorage = games.map(({ steamSpec: _spec, ...rest }) => rest);
+        localStorage.setItem(STORAGE_KEY_GAMES, JSON.stringify(compactForLocalStorage));
+      } catch {
+        try {
+          localStorage.removeItem(STORAGE_KEY_POS_SALES);
+          const compactForLocalStorage = games.map(({ steamSpec: _spec, ...rest }) => rest);
+          localStorage.setItem(STORAGE_KEY_GAMES, JSON.stringify(compactForLocalStorage));
+        } catch (inner) {
+          console.warn('Critical localStorage quota exceeded. Full catalog safely saved in IndexedDB & memory.', inner);
+        }
       }
     }
   },
@@ -433,12 +585,21 @@ export const StorageService = {
       collRef,
       (snapshot) => {
         if (!snapshot.empty) {
+          const now = Date.now();
           const cloudGames: Game[] = [];
           snapshot.forEach((docSnap) => {
-            cloudGames.push(docSnap.data() as Game);
+            const docData = docSnap.data() as Game;
+            const pending = pendingLocalUpdates.get(docData.id);
+            if (pending && pending.expiresAt > now) {
+              cloudGames.push(pending.game);
+            } else {
+              if (pending) pendingLocalUpdates.delete(docData.id);
+              cloudGames.push(docData);
+            }
           });
           // Merge cloud games with built-in codebase games to preserve defaults
-          const merged = this.mergeWithLatestCodebase(cloudGames);
+          const missing = this.getMissingFromCodebase(cloudGames);
+          const merged = missing.length > 0 ? [...cloudGames, ...missing] : cloudGames;
 
           // Prevent race condition: do not overwrite local state with fewer items during active batch upload
           if (isBatchWritingGames) {
@@ -451,10 +612,24 @@ export const StorageService = {
           cachedGames = merged;
           this.saveGames(merged);
           callback(merged);
+
+          // Automatically push any newly added codebase games to Firestore once per session
+          const toPush = missing.filter((g) => !syncedCodebaseIds.has(g.id));
+          if (toPush.length > 0) {
+            toPush.forEach((g) => syncedCodebaseIds.add(g.id));
+            const batchItems = toPush.map((g) => ({
+              id: g.id,
+              data: prepareGameForFirestore(g),
+            }));
+            atomicBatchSet('games', batchItems).catch((err) => {
+              console.warn('Failed to push missing codebase games to Firestore:', err);
+              toPush.forEach((g) => syncedCodebaseIds.delete(g.id));
+            });
+          }
         } else {
           // If Firestore is empty on first boot, seed it with ALL_INITIAL_GAMES
           ALL_INITIAL_GAMES.forEach((g) => {
-            setDoc(doc(db, 'games', g.id), cleanFirestoreDoc(g)).catch(() => {});
+            setDoc(doc(db, 'games', sanitizeFirestoreId(g.id)), prepareGameForFirestore(g)).catch(() => {});
           });
         }
       },
@@ -485,7 +660,7 @@ export const StorageService = {
 
     // Instant Cloud Firestore write: Chrome -> Cloud -> Firefox sync
     try {
-      setDoc(doc(db, 'games', newGame.id), cleanFirestoreDoc(newGame)).catch((err) => {
+      setDoc(doc(db, 'games', newGame.id), prepareGameForFirestore(newGame)).catch((err) => {
         console.warn('Firestore addGame sync warning:', err);
       });
     } catch (err) {
@@ -520,7 +695,7 @@ export const StorageService = {
       try {
         const batchItems = created.map((g) => ({
           id: g.id,
-          data: g,
+          data: prepareGameForFirestore(g),
         }));
         await atomicBatchSet('games', batchItems);
       } catch (err) {
@@ -538,12 +713,21 @@ export const StorageService = {
   updateGame(updatedGame: Game): void {
     const games = this.getGames();
     const index = games.findIndex(g => g.id === updatedGame.id);
+    const normalizedId = sanitizeFirestoreId(updatedGame.id);
+    const nextGame: Game = { ...updatedGame, id: normalizedId };
+
     if (index !== -1) {
-      games[index] = { ...updatedGame };
+      games[index] = nextGame;
+      pendingLocalUpdates.set(normalizedId, {
+        game: nextGame,
+        expiresAt: Date.now() + 10000,
+      });
       this.saveGames(games);
 
       try {
-        setDoc(doc(db, 'games', updatedGame.id), cleanFirestoreDoc(updatedGame), { merge: true }).catch(() => {});
+        setDoc(doc(db, 'games', normalizedId), prepareGameForFirestore(nextGame)).catch((err) => {
+          console.warn('Firestore updateGame sync warning:', err);
+        });
       } catch (err) {
         console.warn('Firestore updateGame failed:', err);
       }
@@ -552,6 +736,19 @@ export const StorageService = {
 
   deleteGame(id: string): void {
     const games = this.getGames();
+    const target = games.find((g) => g.id === id);
+    if (target && target.tag.toLowerCase().includes('steam') && target.tag.toLowerCase().includes('online')) {
+      const appId =
+        target.steamAppId ||
+        (target.id.startsWith('steam_online_') ? Number(target.id.replace('steam_online_', '')) : null) ||
+        extractSteamAppId(target.link);
+      if (appId && Number.isFinite(appId) && appId > 0) {
+        const cfg = this.getSteamOnlineSyncConfig();
+        const nextDeleted = Array.from(new Set([...(cfg.deletedAppIds || []), appId])).slice(-500);
+        this.saveSteamOnlineSyncConfig({ ...cfg, deletedAppIds: nextDeleted });
+      }
+    }
+
     const filtered = games.filter(g => g.id !== id);
     this.saveGames(filtered);
 
@@ -565,6 +762,28 @@ export const StorageService = {
   deleteMultipleGames(ids: string[]): void {
     const idSet = new Set(ids);
     const games = this.getGames();
+    const deletedAppIdsToAdd: number[] = [];
+    games.forEach((target) => {
+      if (
+        idSet.has(target.id) &&
+        target.tag.toLowerCase().includes('steam') &&
+        target.tag.toLowerCase().includes('online')
+      ) {
+        const appId =
+          target.steamAppId ||
+          (target.id.startsWith('steam_online_') ? Number(target.id.replace('steam_online_', '')) : null) ||
+          extractSteamAppId(target.link);
+        if (appId && Number.isFinite(appId) && appId > 0) {
+          deletedAppIdsToAdd.push(appId);
+        }
+      }
+    });
+    if (deletedAppIdsToAdd.length > 0) {
+      const cfg = this.getSteamOnlineSyncConfig();
+      const nextDeleted = Array.from(new Set([...(cfg.deletedAppIds || []), ...deletedAppIdsToAdd])).slice(-500);
+      this.saveSteamOnlineSyncConfig({ ...cfg, deletedAppIds: nextDeleted });
+    }
+
     const filtered = games.filter(g => !idSet.has(g.id));
     this.saveGames(filtered);
 
@@ -1875,6 +2094,483 @@ export const StorageService = {
     }
   },
 
+  // Steam Online Auto-Update Config & Sync (/settings/steamOnlineSync)
+  getSteamOnlineSyncConfig(): SteamOnlineAutoSyncConfig {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY_STEAM_ONLINE_SYNC);
+      if (raw) {
+        return normalizeSteamOnlineSyncConfig(JSON.parse(raw));
+      }
+    } catch (e) {
+      console.warn('Error reading steamOnlineSync config', e);
+    }
+    return normalizeSteamOnlineSyncConfig(DEFAULT_STEAM_ONLINE_SYNC_CONFIG);
+  },
+
+  saveSteamOnlineSyncConfig(config: SteamOnlineAutoSyncConfig): SteamOnlineAutoSyncConfig {
+    const normalized = normalizeSteamOnlineSyncConfig({
+      ...config,
+      updatedAt: new Date().toISOString(),
+    });
+    try {
+      localStorage.setItem(STORAGE_KEY_STEAM_ONLINE_SYNC, JSON.stringify(normalized));
+      idbSet(STORAGE_KEY_STEAM_ONLINE_SYNC, normalized).catch(() => {});
+      setDoc(doc(db, 'settings', 'steamOnlineSync'), cleanFirestoreDoc(normalized), { merge: true }).catch(
+        (err) => {
+          console.warn('Firestore saveSteamOnlineSyncConfig warning:', err);
+          if (err instanceof Error && err.message.toLowerCase().includes('permission')) {
+            handleFirestoreError(err, OperationType.WRITE, 'settings/steamOnlineSync');
+          }
+        }
+      );
+    } catch (e) {
+      console.error('Failed to save steamOnlineSync config', e);
+    }
+    return normalized;
+  },
+
+  subscribeToSteamOnlineSyncConfig(
+    callback: (config: SteamOnlineAutoSyncConfig) => void
+  ): () => void {
+    try {
+      const docRef = doc(db, 'settings', 'steamOnlineSync');
+      const unsubscribe = onSnapshot(
+        docRef,
+        (snapshot) => {
+          if (snapshot.exists()) {
+            const merged = normalizeSteamOnlineSyncConfig(snapshot.data());
+            try {
+              localStorage.setItem(STORAGE_KEY_STEAM_ONLINE_SYNC, JSON.stringify(merged));
+              idbSet(STORAGE_KEY_STEAM_ONLINE_SYNC, merged).catch(() => {});
+            } catch {}
+            callback(merged);
+          } else {
+            const current = this.getSteamOnlineSyncConfig();
+            setDoc(docRef, cleanFirestoreDoc(current), { merge: true }).catch(() => {});
+          }
+        },
+        (error) => {
+          console.warn('Firestore steamOnlineSync listener warning:', error);
+          if (error instanceof Error && error.message.toLowerCase().includes('permission')) {
+            handleFirestoreError(error, OperationType.GET, 'settings/steamOnlineSync');
+          }
+        }
+      );
+      return unsubscribe;
+    } catch {
+      return () => {};
+    }
+  },
+
+  async syncSteamOnlineGames(options?: {
+    force?: boolean;
+    source?: SteamOnlineSyncSource;
+    limit?: number;
+    defaultPriceUsd?: number;
+  }): Promise<{
+    skipped?: boolean;
+    addedCount: number;
+    addedGames: Game[];
+    feedGames?: Array<{
+      appId: number;
+      name: string;
+      genre: string;
+      img: string;
+      steamPriceUsd: number;
+      releaseDate?: string;
+      steamUrl?: string;
+      status: 'added' | 'exists' | 'skipped';
+    }>;
+    config: SteamOnlineAutoSyncConfig;
+    error?: string;
+  }> {
+    if (inFlightSteamOnlineSync) {
+      return inFlightSteamOnlineSync;
+    }
+
+    const runner = async () => {
+      const currentConfig = this.getSteamOnlineSyncConfig();
+      const force = Boolean(options?.force);
+
+      if (!force && !currentConfig.enabled) {
+        return { skipped: true, addedCount: 0, addedGames: [], config: currentConfig };
+      }
+
+      const intervalMs = Math.max(1, currentConfig.intervalHours || 1) * 60 * 60 * 1000;
+      const now = Date.now();
+      if (!force && currentConfig.lastSyncAt && now - currentConfig.lastSyncAt < intervalMs) {
+        return { skipped: true, addedCount: 0, addedGames: [], config: currentConfig };
+      }
+
+      const activeSource = options?.source || currentConfig.source || 'popular_new_online';
+      const activeLimit = options?.limit || currentConfig.maxGamesPerSync || 20;
+      const activePrice =
+        options?.defaultPriceUsd !== undefined
+          ? options.defaultPriceUsd
+          : currentConfig.defaultPriceUsd;
+
+      try {
+        const feed = await fetchSteamOnlineFeed({
+          source: activeSource,
+          limit: activeLimit,
+          refresh: force,
+        });
+
+        const existingGames = this.getGames();
+        const existingOnlineIds = new Set<string>();
+        const existingOnlineAppIds = new Set<number>();
+        const existingOnlineNames = new Set<string>();
+
+        for (const g of existingGames) {
+          existingOnlineIds.add(g.id);
+          const lowerTag = (g.tag || '').toLowerCase();
+          if (lowerTag.includes('steam') && lowerTag.includes('online')) {
+            existingOnlineNames.add(g.name.trim().toLowerCase());
+            if (g.steamAppId) existingOnlineAppIds.add(g.steamAppId);
+            const linkAppId = extractSteamAppId(g.link);
+            if (linkAppId) existingOnlineAppIds.add(linkAppId);
+            if (g.id.startsWith('steam_online_')) {
+              const idNum = Number(g.id.replace('steam_online_', ''));
+              if (Number.isFinite(idNum) && idNum > 0) existingOnlineAppIds.add(idNum);
+            }
+          }
+        }
+
+        const deletedSet = new Set<number>(currentConfig.deletedAppIds || []);
+        const newGamesToCreate: (Omit<Game, 'id'> & { id: string })[] = [];
+        const feedGamesSummary: Array<{
+          appId: number;
+          name: string;
+          genre: string;
+          img: string;
+          steamPriceUsd: number;
+          releaseDate?: string;
+          steamUrl?: string;
+          status: 'added' | 'exists' | 'skipped';
+        }> = [];
+
+        for (const item of feed.games) {
+          // Paid games $20+ only — never add free or under-$20 games
+          if (item.isFree || !item.steamPriceUsd || item.steamPriceUsd < 20) {
+            continue;
+          }
+          const deterministicId = `steam_online_${item.appId}`;
+          const normName = item.name.trim().toLowerCase();
+          if (deletedSet.has(item.appId)) {
+            feedGamesSummary.push({
+              appId: item.appId,
+              name: item.name,
+              genre: item.genre,
+              img: item.img,
+              steamPriceUsd: item.steamPriceUsd,
+              releaseDate: item.releaseDate,
+              steamUrl: item.steamUrl,
+              status: 'skipped',
+            });
+            continue;
+          }
+          if (
+            existingOnlineIds.has(deterministicId) ||
+            existingOnlineAppIds.has(item.appId) ||
+            existingOnlineNames.has(normName)
+          ) {
+            // Backfill official Steam price onto already-synced Steam Online games if missing or updated
+            const existingMatch = existingGames.find((g) => {
+              const lowerTag = (g.tag || '').toLowerCase();
+              const isOnlineTag = lowerTag.includes('steam') && lowerTag.includes('online');
+              return (
+                g.id === deterministicId ||
+                (isOnlineTag &&
+                  (g.steamAppId === item.appId ||
+                    extractSteamAppId(g.link) === item.appId ||
+                    g.name.trim().toLowerCase() === normName))
+              );
+            });
+            if (existingMatch && existingMatch.steamPriceUsd !== item.steamPriceUsd) {
+              this.updateGame({
+                ...existingMatch,
+                steamAppId: existingMatch.steamAppId || item.appId,
+                steamPriceUsd: item.steamPriceUsd,
+              });
+            }
+            feedGamesSummary.push({
+              appId: item.appId,
+              name: item.name,
+              genre: item.genre,
+              img: item.img,
+              steamPriceUsd: item.steamPriceUsd,
+              releaseDate: item.releaseDate,
+              steamUrl: item.steamUrl,
+              status: 'exists',
+            });
+            continue;
+          }
+
+          const safeName = item.name.trim().slice(0, 300);
+          const safeGenre = (item.genre || 'Steam Game').trim().slice(0, 100);
+          const safeImg = (item.img || '').trim();
+          if (!safeName || !safeGenre || !safeImg) continue;
+
+          feedGamesSummary.push({
+            appId: item.appId,
+            name: safeName,
+            genre: safeGenre,
+            img: safeImg,
+            steamPriceUsd: item.steamPriceUsd,
+            releaseDate: item.releaseDate,
+            steamUrl: item.steamUrl,
+            status: 'added',
+          });
+
+          newGamesToCreate.push({
+            id: deterministicId,
+            name: safeName,
+            tag: 'Steam Online',
+            genre: safeGenre,
+            img: safeImg,
+            link: item.steamUrl,
+            steamAppId: item.appId,
+            steamPriceUsd: item.steamPriceUsd,
+            price: activePrice,
+            costPrice: 0,
+            createdAt: new Date().toISOString(),
+          });
+        }
+
+        let addedGames: Game[] = [];
+        if (newGamesToCreate.length > 0) {
+          addedGames = this.addMultipleGames(newGamesToCreate);
+        }
+
+        const updatedConfig = this.saveSteamOnlineSyncConfig({
+          ...currentConfig,
+          source: activeSource,
+          maxGamesPerSync: activeLimit,
+          defaultPriceUsd: activePrice,
+          lastSyncAt: Date.now(),
+          lastSyncedCount: addedGames.length,
+          lastSyncStatus: 'success',
+          lastSyncMessage:
+            addedGames.length > 0
+              ? `Added ${addedGames.length} new $20+ game(s) from store.steampowered.com`
+              : `Up to date with store.steampowered.com (${feed.games.length} checked)`,
+        });
+
+        return {
+          addedCount: addedGames.length,
+          addedGames,
+          feedGames: feedGamesSummary,
+          config: updatedConfig,
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Steam Online sync failed';
+        const errorConfig = this.saveSteamOnlineSyncConfig({
+          ...currentConfig,
+          lastSyncStatus: 'error',
+          lastSyncMessage: message,
+        });
+        return {
+          addedCount: 0,
+          addedGames: [],
+          config: errorConfig,
+          error: message,
+        };
+      }
+    };
+
+    inFlightSteamOnlineSync = runner().finally(() => {
+      inFlightSteamOnlineSync = null;
+    });
+    return inFlightSteamOnlineSync;
+  },
+
+  uploadSteamFeedGamesToOnline(
+    items: Array<{
+      appId: number;
+      name: string;
+      genre: string;
+      img: string;
+      steamPriceUsd: number;
+      releaseDate?: string;
+      steamUrl?: string;
+    }>,
+    options?: { defaultPriceUsd?: number }
+  ): { addedCount: number; updatedCount: number; games: Game[] } {
+    const currentConfig = this.getSteamOnlineSyncConfig();
+    const activePrice =
+      options?.defaultPriceUsd !== undefined
+        ? options.defaultPriceUsd
+        : currentConfig.defaultPriceUsd;
+
+    const existingGames = this.getGames();
+    const toCreate: (Omit<Game, 'id'> & { id: string })[] = [];
+    let updatedCount = 0;
+    const uploadedAppIds = new Set<number>();
+
+    for (const item of items) {
+      const safeName = (item.name || '').trim().slice(0, 300);
+      const safeGenre = (item.genre || 'Steam Game').trim().slice(0, 100);
+      const safeImg = (item.img || '').trim();
+      if (!safeName || !safeGenre || !safeImg) continue;
+
+      uploadedAppIds.add(item.appId);
+      const deterministicId = `steam_online_${item.appId}`;
+      const normName = safeName.toLowerCase();
+      const steamUrl = item.steamUrl || `https://store.steampowered.com/app/${item.appId}/`;
+
+      const existingMatch = existingGames.find((g) => {
+        const lowerTag = (g.tag || '').toLowerCase();
+        const isOnlineTag = lowerTag.includes('steam') && lowerTag.includes('online');
+        return (
+          g.id === deterministicId ||
+          (isOnlineTag &&
+            (g.steamAppId === item.appId ||
+              extractSteamAppId(g.link) === item.appId ||
+              g.name.trim().toLowerCase() === normName))
+        );
+      });
+
+      if (existingMatch) {
+        this.updateGame({
+          ...existingMatch,
+          name: safeName,
+          tag: 'Steam Online',
+          genre: safeGenre,
+          img: safeImg,
+          link: steamUrl,
+          steamAppId: item.appId,
+          steamPriceUsd: item.steamPriceUsd,
+          // Strictly preserve existing Admin description; never overwrite with Steam description
+          description: existingMatch.description,
+          ...(activePrice !== undefined ? { price: activePrice } : {}),
+        });
+        updatedCount++;
+      } else {
+        toCreate.push({
+          id: deterministicId,
+          name: safeName,
+          tag: 'Steam Online',
+          genre: safeGenre,
+          img: safeImg,
+          link: steamUrl,
+          steamAppId: item.appId,
+          steamPriceUsd: item.steamPriceUsd,
+          price: activePrice,
+          costPrice: 0,
+          createdAt: new Date().toISOString(),
+        });
+      }
+    }
+
+    let createdGames: Game[] = [];
+    if (toCreate.length > 0) {
+      createdGames = this.addMultipleGames(toCreate);
+    }
+
+    if (uploadedAppIds.size > 0 && (currentConfig.deletedAppIds?.length || 0) > 0) {
+      const nextDeleted = (currentConfig.deletedAppIds || []).filter((id) => !uploadedAppIds.has(id));
+      if (nextDeleted.length !== (currentConfig.deletedAppIds || []).length) {
+        this.saveSteamOnlineSyncConfig({
+          ...currentConfig,
+          deletedAppIds: nextDeleted,
+        });
+      }
+    }
+
+    return {
+      addedCount: createdGames.length,
+      updatedCount,
+      games: this.getGames(),
+    };
+  },
+
+  async backfillSteamOnlinePrices(): Promise<number> {
+    const games = this.getGames();
+    const targets = games.filter((g) => {
+      const lower = (g.tag || '').toLowerCase();
+      return lower.includes('steam') && lower.includes('online') && !g.steamPriceUsd;
+    });
+    if (targets.length === 0) return 0;
+
+    try {
+      const resolvedByTargetId = new Map<string, { steamPriceUsd: number; appId?: number }>();
+
+      // 1. Fast match from Steam Online feed first
+      try {
+        const cfg = this.getSteamOnlineSyncConfig();
+        const feed = await fetchSteamOnlineFeed({
+          source: cfg.source || 'popular_new_online',
+          limit: Math.max(30, cfg.maxGamesPerSync || 30),
+          refresh: false,
+        });
+        const byAppId = new Map<number, number>();
+        const byName = new Map<string, number>();
+        for (const f of feed.games) {
+          if (typeof f.steamPriceUsd === 'number' && f.steamPriceUsd > 0) {
+            byAppId.set(f.appId, f.steamPriceUsd);
+            byName.set(f.name.trim().toLowerCase(), f.steamPriceUsd);
+          }
+        }
+        for (const t of targets) {
+          const appId =
+            t.steamAppId ||
+            (t.id.startsWith('steam_online_') ? Number(t.id.replace('steam_online_', '')) : null) ||
+            extractSteamAppId(t.link);
+          const foundPrice =
+            (appId ? byAppId.get(appId) : undefined) ?? byName.get(t.name.trim().toLowerCase());
+          if (foundPrice && foundPrice > 0) {
+            resolvedByTargetId.set(t.id, {
+              steamPriceUsd: foundPrice,
+              appId: appId ?? undefined,
+            });
+          }
+        }
+      } catch {
+        // Fallback to direct Steam batch lookup below
+      }
+
+      // 2. Direct Steam Store lookup for any remaining targets (e.g. manual Steam Online games like GTA V Enhanced)
+      const unresolved = targets.filter((t) => !resolvedByTargetId.has(t.id));
+      if (unresolved.length > 0) {
+        const batchPrices = await fetchSteamPricesBatch(
+          unresolved.map((t) => ({
+            id: t.id,
+            name: t.name,
+            link: t.link,
+            steamAppId: t.steamAppId,
+          }))
+        );
+        for (const t of unresolved) {
+          const hit = batchPrices[t.id];
+          if (hit && typeof hit.steamPriceUsd === 'number' && hit.steamPriceUsd > 0) {
+            resolvedByTargetId.set(t.id, {
+              steamPriceUsd: hit.steamPriceUsd,
+              appId: hit.appId,
+            });
+          }
+        }
+      }
+
+      let patched = 0;
+      const latestGamesById = new Map(this.getGames().map((g) => [g.id, g]));
+      for (const t of targets) {
+        const resolved = resolvedByTargetId.get(t.id);
+        if (resolved && resolved.steamPriceUsd > 0) {
+          const latest = latestGamesById.get(t.id) || t;
+          this.updateGame({
+            ...latest,
+            steamAppId: latest.steamAppId || resolved.appId,
+            steamPriceUsd: resolved.steamPriceUsd,
+          });
+          patched++;
+        }
+      }
+      return patched;
+    } catch {
+      return 0;
+    }
+  },
+
   // Real-time Cloud Listener for Version History Snapshots
   subscribeToVersionHistory(callback: (history: ReportVersionSnapshot[]) => void): () => void {
     const collRef = collection(db, 'versionHistory');
@@ -2086,6 +2782,7 @@ export const StorageService = {
       reportRows: this.getReportRows(),
       expenses: this.getExpenses(),
       reportSavings: this.getReportSavings(),
+      steamOnlineSync: this.getSteamOnlineSyncConfig(),
       versionHistory: this.getVersionHistory(),
     };
     return JSON.stringify(payload, null, 2);
@@ -2115,6 +2812,9 @@ export const StorageService = {
         }
         if (parsed.reportSavings) {
           this.saveReportSavings(parsed.reportSavings);
+        }
+        if (parsed.steamOnlineSync) {
+          this.saveSteamOnlineSyncConfig(parsed.steamOnlineSync);
         }
         if (Array.isArray(parsed.versionHistory)) {
           this.saveVersionHistory(parsed.versionHistory);
@@ -2148,19 +2848,18 @@ export const StorageService = {
   // 1-Click Codebase Sync between Google AI Studio and Netlify
   syncWithCodebase(): { addedCount: number; totalGames: number } {
     const current = this.getGames();
-    const existingIds = new Set(current.map((g) => g.id));
-    const existingNames = new Set(current.map((g) => g.name.trim().toLowerCase()));
-
-    const missingFromCodebase: Game[] = [];
-    for (const codeGame of ALL_INITIAL_GAMES) {
-      if (!existingIds.has(codeGame.id) && !existingNames.has(codeGame.name.trim().toLowerCase())) {
-        missingFromCodebase.push(codeGame);
-      }
-    }
+    const missingFromCodebase = this.getMissingFromCodebase(current);
 
     if (missingFromCodebase.length > 0) {
       const merged = [...current, ...missingFromCodebase];
       this.saveGames(merged);
+      const batchItems = missingFromCodebase.map((g) => ({
+        id: g.id,
+        data: prepareGameForFirestore(g),
+      }));
+      atomicBatchSet('games', batchItems).catch((err) => {
+        console.warn('Firestore syncWithCodebase push failed:', err);
+      });
       return { addedCount: missingFromCodebase.length, totalGames: merged.length };
     }
 

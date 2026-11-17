@@ -605,6 +605,567 @@ async function startServer() {
     }
   });
 
+  // Steam New Releases Auto-Update Feed Endpoint (directly from https://store.steampowered.com/)
+  const STEAM_ONLINE_FEED_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+  const STEAM_TAG_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+  let steamPopularTagsCache: { map: Map<number, string>; expiresAt: number } | null = null;
+  const steamOnlineFeedCache = new Map<string, { payload: any; expiresAt: number }>();
+
+  const GENERIC_FEATURE_TAGS = new Set([
+    'singleplayer',
+    'multiplayer',
+    'online co-op',
+    'co-op',
+    'pvp',
+    'free to play',
+    'early access',
+    '3d',
+    'first-person',
+    'third person',
+    'controller',
+    'great soundtrack',
+    'atmospheric',
+    'story rich',
+    'difficult',
+    'replay value',
+    'character customization',
+    'female protagonist',
+    'pixel graphics',
+    'colorful',
+    'funny',
+    'gore',
+    'violent',
+    'nudity',
+    'sexual content',
+  ]);
+
+  async function fetchTextWithTimeout(url: string, timeoutMs = 9000): Promise<string> {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': STEAM_FETCH_HEADERS['User-Agent'],
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+        },
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status} from ${url}`);
+      }
+      return await response.text();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  function extractAppIdsBetweenMarkers(
+    html: string,
+    startMarker: string,
+    endMarker?: string
+  ): number[] {
+    if (!html) return [];
+    const startIdx = html.indexOf(startMarker);
+    if (startIdx < 0) return [];
+    const endIdx = endMarker ? html.indexOf(endMarker, startIdx + startMarker.length) : -1;
+    const slice =
+      endIdx > startIdx ? html.slice(startIdx, endIdx) : html.slice(startIdx, startIdx + 35000);
+    const ids: number[] = [];
+    const seen = new Set<number>();
+    for (const match of slice.matchAll(/data-ds-appid="(\d{3,10})"/g)) {
+      const id = Number(match[1]);
+      if (Number.isFinite(id) && id > 0 && !seen.has(id)) {
+        seen.add(id);
+        ids.push(id);
+      }
+    }
+    return ids;
+  }
+
+  async function getSteamTagNameMap(): Promise<Map<number, string>> {
+    const now = Date.now();
+    if (steamPopularTagsCache && steamPopularTagsCache.expiresAt > now) {
+      return steamPopularTagsCache.map;
+    }
+    try {
+      const tagsList = await fetchJsonWithTimeout(
+        'https://store.steampowered.com/tagdata/populartags/english',
+        7000
+      );
+      const map = new Map<number, string>();
+      if (Array.isArray(tagsList)) {
+        for (const t of tagsList) {
+          if (t && typeof t.tagid === 'number' && typeof t.name === 'string') {
+            map.set(t.tagid, t.name.trim());
+          }
+        }
+      }
+      steamPopularTagsCache = { map, expiresAt: now + STEAM_TAG_CACHE_TTL_MS };
+      return map;
+    } catch {
+      return steamPopularTagsCache?.map || new Map<number, string>();
+    }
+  }
+
+  function resolveGenreFromSteamTags(tagIds: number[], tagMap: Map<number, string>): string {
+    const names = tagIds
+      .map((id) => tagMap.get(id))
+      .filter((n): n is string => Boolean(n));
+    const specific = names.filter((n) => !GENERIC_FEATURE_TAGS.has(n.toLowerCase()));
+    const lowerSet = new Set(specific.map((n) => n.toLowerCase()));
+
+    if (lowerSet.has('action') && lowerSet.has('rpg')) return 'Action RPG';
+    if (lowerSet.has('action') && lowerSet.has('adventure')) return 'Action Adventure';
+    if (lowerSet.has('battle royale')) return 'Battle Royale';
+    if (lowerSet.has('mmorpg') || lowerSet.has('massively multiplayer')) return 'MMORPG';
+    if (lowerSet.has('tactical') && (lowerSet.has('fps') || lowerSet.has('shooter'))) {
+      return 'Tactical Shooter';
+    }
+    if (lowerSet.has('fps')) return 'FPS Shooter';
+    if (lowerSet.has('racing') && lowerSet.has('simulation')) return 'Racing Sim';
+    if (lowerSet.has('survival')) return 'Survival';
+    if (specific.length >= 2) return `${specific[0]} / ${specific[1]}`;
+    if (specific.length === 1) return specific[0];
+    if (names.length >= 1) return names[0];
+    return 'Steam Game';
+  }
+
+  async function fetchSteamOnlineFeedFromUpstream(
+    source: string,
+    limit: number,
+    forceRefresh: boolean
+  ) {
+    const normalizedSource =
+      source === 'new_releases_online' || source === 'top_sellers_online'
+        ? source
+        : 'popular_new_online';
+    const clampedLimit = Math.max(1, Math.min(50, limit || 30));
+    const cacheKey = `${normalizedSource}::${clampedLimit}`;
+    const now = Date.now();
+
+    if (!forceRefresh) {
+      const cached = steamOnlineFeedCache.get(cacheKey);
+      if (cached && cached.expiresAt > now) {
+        return cached.payload;
+      }
+    }
+
+    const extractAllAppIds = (html: string): number[] => {
+      if (!html) return [];
+      const ids: number[] = [];
+      const seen = new Set<number>();
+      for (const match of html.matchAll(/data-ds-appid="(\d{3,10})"/g)) {
+        const id = Number(match[1]);
+        if (Number.isFinite(id) && id > 0 && !seen.has(id)) {
+          seen.add(id);
+          ids.push(id);
+        }
+      }
+      return ids;
+    };
+
+    const [
+      homeHtml,
+      exploreHtml,
+      featuredCategories,
+      searchPopularPaid1,
+      searchPopularPaid2,
+      searchTopSellersPaid1,
+      searchTopSellersPaid2,
+      tagMap,
+    ] = await Promise.all([
+      fetchTextWithTimeout('https://store.steampowered.com/?cc=US&l=english', 9000).catch(() => ''),
+      fetchTextWithTimeout('https://store.steampowered.com/explore/new/?cc=US&l=english', 9000).catch(
+        () => ''
+      ),
+      fetchJsonWithTimeout('https://store.steampowered.com/api/featuredcategories/?l=english&cc=US', 8000).catch(
+        () => null
+      ),
+      fetchJsonWithTimeout(
+        'https://store.steampowered.com/search/results/?query&filter=popularnew&category1=998&hidef2p=1&infinite=1&start=0&count=60&cc=US&l=english',
+        8500
+      ).catch(() => null),
+      fetchJsonWithTimeout(
+        'https://store.steampowered.com/search/results/?query&filter=popularnew&category1=998&hidef2p=1&infinite=1&start=60&count=60&cc=US&l=english',
+        8500
+      ).catch(() => null),
+      fetchJsonWithTimeout(
+        'https://store.steampowered.com/search/results/?query&filter=topsellers&category1=998&hidef2p=1&infinite=1&start=0&count=60&cc=US&l=english',
+        8500
+      ).catch(() => null),
+      fetchJsonWithTimeout(
+        'https://store.steampowered.com/search/results/?query&filter=topsellers&category1=998&hidef2p=1&infinite=1&start=60&count=60&cc=US&l=english',
+        8500
+      ).catch(() => null),
+      getSteamTagNameMap(),
+    ]);
+
+    // 1. Steam Homepage "Popular New Releases" tab (https://store.steampowered.com/)
+    const homePopularNewIds = extractAppIdsBetweenMarkers(
+      homeHtml,
+      'id="tab_newreleases_content"',
+      'id="tab_topsellers_content"'
+    );
+    // 2. Steam Explore New "New Top Sellers Released This Month"
+    const exploreTopMonthIds = extractAppIdsBetweenMarkers(
+      exploreHtml,
+      'New Top Sellers',
+      'Popular New Releases'
+    );
+    // 3. Steam Explore New "New Releases" latest queue
+    const exploreAllNewIds = extractAppIdsBetweenMarkers(
+      exploreHtml,
+      'id="tab_allnewreleases_content"',
+      'id="tab_under10_content"'
+    );
+    // 4. Steam paid popular / top-sellers search results (excludes free-to-play via hidef2p=1)
+    const searchPopularPaidIds = [
+      ...extractAllAppIds(String(searchPopularPaid1?.results_html || '')),
+      ...extractAllAppIds(String(searchPopularPaid2?.results_html || '')),
+    ];
+    const searchTopPaidIds = [
+      ...extractAllAppIds(String(searchTopSellersPaid1?.results_html || '')),
+      ...extractAllAppIds(String(searchTopSellersPaid2?.results_html || '')),
+    ];
+    // 5. Steam featured categories new_releases fallback
+    const featuredNewIds: number[] = Array.isArray(featuredCategories?.new_releases?.items)
+      ? featuredCategories.new_releases.items
+          .map((item: any) => Number(item?.id))
+          .filter((id: number) => Number.isFinite(id) && id > 0)
+      : [];
+
+    const orderedAppIds: number[] = [];
+    const seenIds = new Set<number>();
+    const appendIds = (list: number[]) => {
+      for (const id of list) {
+        if (Number.isFinite(id) && id > 0 && !seenIds.has(id)) {
+          seenIds.add(id);
+          orderedAppIds.push(id);
+        }
+      }
+    };
+
+    if (normalizedSource === 'new_releases_online') {
+      appendIds(homePopularNewIds);
+      appendIds(exploreAllNewIds);
+      appendIds(exploreTopMonthIds);
+      appendIds(searchPopularPaidIds);
+      appendIds(featuredNewIds);
+    } else if (normalizedSource === 'top_sellers_online') {
+      appendIds(exploreTopMonthIds);
+      appendIds(searchTopPaidIds);
+      appendIds(homePopularNewIds);
+      appendIds(searchPopularPaidIds);
+    } else {
+      // Default: Paid ($20+) Popular New Releases + 1-Year Paid Top & Popular Releases from store.steampowered.com
+      appendIds(exploreTopMonthIds);
+      appendIds(homePopularNewIds);
+      appendIds(searchPopularPaidIds);
+      appendIds(searchTopPaidIds);
+      appendIds(featuredNewIds);
+    }
+
+    const batchIds = orderedAppIds.slice(0, 180);
+    if (batchIds.length === 0) {
+      throw new Error('Could not load paid $20+ new releases from store.steampowered.com.');
+    }
+
+    const chunks: number[][] = [];
+    for (let i = 0; i < batchIds.length; i += 70) {
+      chunks.push(batchIds.slice(i, i + 70));
+    }
+
+    const browseResponses = await Promise.all(
+      chunks.map((chunk) => {
+        const browseInput = JSON.stringify({
+          ids: chunk.map((appid) => ({ appid })),
+          context: { language: 'english', country_code: 'US' },
+          data_request: {
+            include_assets: true,
+            include_basic_info: true,
+            include_release: true,
+            include_tag_count: 10,
+            include_all_purchase_options: false,
+          },
+        });
+        return fetchJsonWithTimeout(
+          `https://api.steampowered.com/IStoreBrowseService/GetItems/v1?input_json=${encodeURIComponent(
+            browseInput
+          )}`,
+          9500
+        ).catch(() => null);
+      })
+    );
+
+    const storeItems: any[] = [];
+    for (const resp of browseResponses) {
+      if (Array.isArray(resp?.response?.store_items)) {
+        storeItems.push(...resp.response.store_items);
+      }
+    }
+
+    const itemById = new Map<number, any>();
+    for (const si of storeItems) {
+      if (si && typeof si.appid === 'number') {
+        itemById.set(si.appid, si);
+      }
+    }
+
+    const nowSec = Math.floor(now / 1000);
+    const maxAgeSec = 365 * 86400; // Last 1 year of paid Steam releases
+    const minPriceCents = 2000; // Strictly $20.00 USD and above
+    const filteredItems: any[] = [];
+    for (const appId of batchIds) {
+      const item = itemById.get(appId);
+      // type === 0 ensures full Games only (skips DLCs, demos, soundtracks, videos, bundles)
+      if (!item || item.success !== 1 || item.visible === false || item.type !== 0 || !item.name) {
+        continue;
+      }
+      if (item.release?.is_coming_soon) {
+        continue;
+      }
+      // Paid games $20+ only — exclude all free & under-$20 titles
+      if (item.is_free) {
+        continue;
+      }
+      const rawCents = Number(item.best_purchase_option?.final_price_in_cents);
+      if (!Number.isFinite(rawCents) || rawCents < minPriceCents) {
+        continue;
+      }
+      // Strictly released within the last 1 year
+      const relSec = Number(item.release?.steam_release_date || 0);
+      if (!Number.isFinite(relSec) || relSec <= 0 || nowSec - relSec > maxAgeSec) {
+        continue;
+      }
+      filteredItems.push(item);
+      if (filteredItems.length >= clampedLimit) break;
+    }
+
+    const games = await Promise.all(
+      filteredItems.map(async (item) => {
+        const appId = Number(item.appid);
+        const assets = item.assets || {};
+        const format = assets.asset_url_format || `steam/apps/${appId}/\${FILENAME}`;
+        const directManifestCover =
+          buildAssetUrl(format, assets.library_capsule_2x) ||
+          buildAssetUrl(format, assets.library_capsule) ||
+          buildAssetUrl(format, assets.main_capsule_2x) ||
+          buildAssetUrl(format, assets.header_2x) ||
+          buildAssetUrl(format, assets.header);
+
+        let coverImg = directManifestCover || '';
+        if (!coverImg) {
+          const fallbackCandidates = [
+            `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${appId}/library_600x900_2x.jpg`,
+            `https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${appId}/header.jpg`,
+          ];
+          coverImg = fallbackCandidates[1];
+          for (const url of fallbackCandidates) {
+            if (await checkUrlReturns200(url)) {
+              coverImg = url;
+              break;
+            }
+          }
+        }
+
+        const tagIds: number[] = Array.isArray(item.tagids) ? item.tagids : [];
+        const genre = resolveGenreFromSteamTags(tagIds, tagMap);
+        const origCents = Number(item.best_purchase_option?.original_price_in_cents);
+        const finalCents = Number(item.best_purchase_option?.final_price_in_cents);
+        const fullCents =
+          Number.isFinite(origCents) && origCents > 0
+            ? Math.max(origCents, Number.isFinite(finalCents) ? finalCents : 0)
+            : finalCents;
+        const steamPriceUsd = Number.isFinite(fullCents) && fullCents >= minPriceCents ? fullCents / 100 : 0;
+        const releaseSec = Number(item.release?.steam_release_date);
+        const releaseDate =
+          Number.isFinite(releaseSec) && releaseSec > 0
+            ? new Date(releaseSec * 1000).toISOString().slice(0, 10)
+            : '';
+
+        return {
+          appId,
+          name: String(item.name).trim(),
+          genre: genre.slice(0, 100),
+          img: coverImg,
+          steamUrl: `https://store.steampowered.com/app/${appId}/`,
+          releaseDate,
+          steamPriceUsd,
+          isFree: false,
+        };
+      })
+    );
+
+    const validGames = games.filter((g) => g.name && g.img && g.genre && g.steamPriceUsd >= 20 && !g.isFree);
+    const payload = {
+      fetchedAt: now,
+      source: normalizedSource,
+      count: validGames.length,
+      games: validGames,
+    };
+
+    steamOnlineFeedCache.set(cacheKey, {
+      payload,
+      expiresAt: now + STEAM_ONLINE_FEED_CACHE_TTL_MS,
+    });
+
+    return payload;
+  }
+
+  app.get('/api/steam-online-games', async (req: Request, res: Response) => {
+    const source = typeof req.query.source === 'string' ? req.query.source.trim() : 'popular_new_online';
+    const limit = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : 20;
+    const refreshParam = typeof req.query.refresh === 'string' ? req.query.refresh.trim() : '';
+    const forceRefresh = refreshParam === '1' || refreshParam === 'true';
+
+    try {
+      const payload = await fetchSteamOnlineFeedFromUpstream(source, limit, forceRefresh);
+      res.setHeader('Cache-Control', 'public, max-age=120');
+      res.json(payload);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Failed to fetch new games from Steam Store.';
+      res.status(502).json({ error: message });
+    }
+  });
+
+  // Batch Steam Full Price Resolver (for existing/manual Steam Online games)
+  const steamPriceCache = new Map<number, { steamPriceUsd: number; expiresAt: number }>();
+
+  app.post('/api/steam-prices', async (req: Request, res: Response) => {
+    const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+    const items = rawItems.slice(0, 50) as Array<{
+      id?: string;
+      name?: string;
+      link?: string;
+      steamAppId?: number;
+    }>;
+
+    if (items.length === 0) {
+      res.json({ prices: {} });
+      return;
+    }
+
+    const now = Date.now();
+    const resolvedList = await Promise.all(
+      items.map(async (item) => {
+        const key = String(item.id || item.name || '').trim();
+        if (!key) return null;
+        let appId: number | null =
+          (typeof item.steamAppId === 'number' && Number.isFinite(item.steamAppId) && item.steamAppId > 0
+            ? item.steamAppId
+            : null) ||
+          extractSteamAppId(item.link) ||
+          extractSteamAppId(item.name);
+
+        if (!appId && item.name) {
+          const aliasKey = `::${normalizeSearchTitle(item.name).toLowerCase()}`;
+          const cachedAlias = lookupAliasCache.get(aliasKey);
+          if (cachedAlias && cachedAlias.expiresAt > now) {
+            appId = cachedAlias.appId;
+          } else {
+            appId = await resolveAppIdBySearch(item.name).catch(() => null);
+            if (appId && aliasKey !== '::') {
+              lookupAliasCache.set(aliasKey, { appId, expiresAt: now + STEAM_CACHE_TTL_MS });
+            }
+          }
+        }
+
+        if (!appId) return null;
+        return { key, appId };
+      })
+    );
+
+    const validEntries = resolvedList.filter(
+      (entry): entry is { key: string; appId: number } => Boolean(entry)
+    );
+    const prices: Record<string, { appId: number; steamPriceUsd: number }> = {};
+    const uncachedAppIds = new Set<number>();
+
+    for (const entry of validEntries) {
+      const cached = steamPriceCache.get(entry.appId);
+      if (cached && cached.expiresAt > now && cached.steamPriceUsd > 0) {
+        prices[entry.key] = { appId: entry.appId, steamPriceUsd: cached.steamPriceUsd };
+      } else {
+        uncachedAppIds.add(entry.appId);
+      }
+    }
+
+    const missingIds = Array.from(uncachedAppIds);
+    if (missingIds.length > 0) {
+      try {
+        const browseInput = JSON.stringify({
+          ids: missingIds.map((appid) => ({ appid })),
+          context: { language: 'english', country_code: 'US' },
+          data_request: {
+            include_assets: false,
+            include_basic_info: false,
+            include_all_purchase_options: false,
+          },
+        });
+        const browseResp = await fetchJsonWithTimeout(
+          `https://api.steampowered.com/IStoreBrowseService/GetItems/v1?input_json=${encodeURIComponent(
+            browseInput
+          )}`,
+          8500
+        ).catch(() => null);
+
+        const storeItems = Array.isArray(browseResp?.response?.store_items)
+          ? browseResp.response.store_items
+          : [];
+        for (const si of storeItems) {
+          const idNum = Number(si?.appid);
+          if (!Number.isFinite(idNum) || idNum <= 0) continue;
+          const origCents = Number(si?.best_purchase_option?.original_price_in_cents);
+          const finalCents = Number(si?.best_purchase_option?.final_price_in_cents);
+          const fullCents =
+            Number.isFinite(origCents) && origCents > 0
+              ? Math.max(origCents, Number.isFinite(finalCents) ? finalCents : 0)
+              : finalCents;
+          if (Number.isFinite(fullCents) && fullCents > 0) {
+            const usd = Math.round(fullCents) / 100;
+            steamPriceCache.set(idNum, { steamPriceUsd: usd, expiresAt: now + STEAM_CACHE_TTL_MS });
+          }
+        }
+      } catch {
+        // Fallback below for individual missing items
+      }
+
+      // Fallback via appdetails for any appId still missing price
+      const stillMissing = missingIds.filter((idNum) => !steamPriceCache.has(idNum));
+      if (stillMissing.length > 0) {
+        await Promise.all(
+          stillMissing.slice(0, 15).map(async (idNum) => {
+            try {
+              const details = await fetchJsonWithTimeout(
+                `https://store.steampowered.com/api/appdetails?appids=${idNum}&filters=price_overview&cc=US&l=en`,
+                6000
+              );
+              const overview = details?.[String(idNum)]?.data?.price_overview;
+              const rawCents = Number(overview?.initial || overview?.final);
+              if (Number.isFinite(rawCents) && rawCents > 0) {
+                const usd = Math.round(rawCents) / 100;
+                steamPriceCache.set(idNum, { steamPriceUsd: usd, expiresAt: now + STEAM_CACHE_TTL_MS });
+              }
+            } catch {
+              // ignore individual lookup error
+            }
+          })
+        );
+      }
+
+      for (const entry of validEntries) {
+        const resolved = steamPriceCache.get(entry.appId);
+        if (resolved && resolved.steamPriceUsd > 0) {
+          prices[entry.key] = { appId: entry.appId, steamPriceUsd: resolved.steamPriceUsd };
+        }
+      }
+    }
+
+    res.json({ prices });
+  });
+
   const httpServer = http.createServer(app);
 
   const isProd =

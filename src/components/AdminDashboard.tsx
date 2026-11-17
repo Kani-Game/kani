@@ -1,13 +1,16 @@
 import React, { useState, useEffect, useId, useRef, useCallback } from 'react';
-import { Game, SiteSettings, SteamSpecData, UserAccountsConfig, UserRole } from '../types/game';
+import { Game, SiteSettings, SteamSpecData, UserAccountsConfig, UserRole, SteamOnlineAutoSyncConfig, SteamOnlineSyncSource } from '../types/game';
 import { StorageService } from '../services/storageService';
 import { POSUploadProductModal } from './POSUploadProductModal';
 import { POSMultiUploadModal } from './POSMultiUploadModal';
 import { DailyFinancialReport } from './DailyFinancialReport';
 import { GameModal } from './GameModal';
 import { CoverMediaForm } from './CoverMediaModal';
+import { SteamOnlineCoverForm } from './SteamOnlineCoverModal';
 import { extractSteamAppId, fetchSteamSpec } from '../services/steamService';
 import { compressImageFile } from '../utils/imageUtils';
+import { SteamOnlineSyncModal, SteamSyncModalState, SteamSyncFeedItem } from './SteamOnlineSyncModal';
+import { MissingSteamSpecsModal } from './MissingSteamSpecsModal';
 
 interface AdminDashboardProps {
   games: Game[];
@@ -54,6 +57,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [activeTab, setActiveTab] = useState<AdminTab>('games');
   const [searchFilter, setSearchFilter] = useState('');
   const [tagFilter, setTagFilter] = useState<string>('all');
+  const [specFilter, setSpecFilter] = useState<'all' | 'missing' | 'saved' | 'skipped'>('all');
   const [selectedGameIds, setSelectedGameIds] = useState<string[]>([]);
   const [editingGame, setEditingGame] = useState<Game | null>(null);
 
@@ -66,6 +70,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [formDesc, setFormDesc] = useState('');
   const [formPrice, setFormPrice] = useState('');
   const [formCostPrice, setFormCostPrice] = useState('0');
+  const [formSteamPrice, setFormSteamPrice] = useState('');
+  const [formDiscountPercent, setFormDiscountPercent] = useState('');
   const [previewError, setPreviewError] = useState(false);
   const [editSteamLink, setEditSteamLink] = useState('');
   const [editSteamGenres, setEditSteamGenres] = useState<string[]>([]);
@@ -78,11 +84,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   } | null>(null);
   const lastEditSteamAppIdRef = useRef<number | null>(null);
   const [specInspectGame, setSpecInspectGame] = useState<Game | null>(null);
+  const [isMissingSpecsModalOpen, setIsMissingSpecsModalOpen] = useState(false);
   const [specSyncProgress, setSpecSyncProgress] = useState<{
     done: number;
     total: number;
     saved: number;
   } | null>(null);
+  const [steamOnlineSyncConfig, setSteamOnlineSyncConfig] = useState<SteamOnlineAutoSyncConfig>(() =>
+    StorageService.getSteamOnlineSyncConfig()
+  );
+  const [isSyncingSteamOnline, setIsSyncingSteamOnline] = useState(false);
+  const [showSteamOnlinePanel, setShowSteamOnlinePanel] = useState(false);
+  const [steamSyncModal, setSteamSyncModal] = useState<SteamSyncModalState>({
+    isOpen: false,
+    isLoading: false,
+    addedCount: 0,
+    feedGames: [],
+  });
 
 
 
@@ -129,8 +147,84 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setAdminUsername(accs.admin.username);
       setPosUsername(accs.pos.username);
     });
-    return () => unsub();
+    const unsubSteamOnline = StorageService.subscribeToSteamOnlineSyncConfig((cfg) => {
+      setSteamOnlineSyncConfig(cfg);
+    });
+    return () => {
+      unsub();
+      unsubSteamOnline();
+    };
   }, []);
+
+  useEffect(() => {
+    if (tagFilter === 'steam-online') {
+      setShowSteamOnlinePanel(true);
+    }
+  }, [tagFilter]);
+
+  const handleUpdateSteamOnlineConfig = (patch: Partial<SteamOnlineAutoSyncConfig>) => {
+    const saved = StorageService.saveSteamOnlineSyncConfig({
+      ...steamOnlineSyncConfig,
+      ...patch,
+    });
+    setSteamOnlineSyncConfig(saved);
+  };
+
+  const handleRunSteamOnlineSyncNow = async () => {
+    setIsSyncingSteamOnline(true);
+    setSteamSyncModal({
+      isOpen: true,
+      isLoading: true,
+      addedCount: 0,
+      feedGames: [],
+    });
+    try {
+      const res = await StorageService.syncSteamOnlineGames({
+        force: true,
+        source: steamOnlineSyncConfig.source,
+        limit: steamOnlineSyncConfig.maxGamesPerSync,
+        defaultPriceUsd: steamOnlineSyncConfig.defaultPriceUsd,
+      });
+      setSteamOnlineSyncConfig(res.config);
+      onRefreshGames?.();
+      setSteamSyncModal({
+        isOpen: true,
+        isLoading: false,
+        addedCount: res.addedCount,
+        feedGames: res.feedGames || [],
+        error: res.error,
+      });
+      if (res.error) {
+        onShowToast(`Steam Online Sync Error: ${res.error}`, 'error');
+      } else if (res.addedCount > 0) {
+        onShowToast(`🎉 Auto-Update Steam Online: បានបន្ថែម Game ថ្មី ${res.addedCount} ពី Steam!`);
+      } else {
+        onShowToast('Steam Online មាន Game ថ្មីៗរួចរាល់ហើយ (No new games to add).', 'info');
+      }
+    } finally {
+      setIsSyncingSteamOnline(false);
+    }
+  };
+
+  const handleUploadSteamFeedGames = (items: SteamSyncFeedItem[]) => {
+    if (items.length === 0) return;
+    const result = StorageService.uploadSteamFeedGamesToOnline(items, {
+      defaultPriceUsd: steamOnlineSyncConfig.defaultPriceUsd,
+    });
+    const uploadedIds = new Set(items.map((i) => i.appId));
+    setSteamOnlineSyncConfig(StorageService.getSteamOnlineSyncConfig());
+    onRefreshGames?.();
+    setSteamSyncModal((prev) => ({
+      ...prev,
+      addedCount: prev.addedCount + result.addedCount,
+      feedGames: prev.feedGames.map((g) =>
+        uploadedIds.has(g.appId) ? { ...g, status: 'added' as const } : g
+      ),
+    }));
+    onShowToast(
+      `🎉 បាន Upload Game ចំនួន ${items.length} ចូល Category "Steam Online" នៅលើ Front Store រួចរាល់!`
+    );
+  };
 
   // Confirmation Modals
   const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -210,7 +304,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         : tagFilter === 'steam'
         ? g.tag.toLowerCase().includes('steam') && !g.tag.toLowerCase().includes('online')
         : !g.tag.toLowerCase().includes('steam') && !g.tag.toLowerCase().includes('product');
-    return matchesSearch && matchesTag;
+    const isProduct = g.tag.toLowerCase().includes('product');
+    const matchesSpec =
+      specFilter === 'all'
+        ? true
+        : specFilter === 'missing'
+        ? !isProduct && !g.skipSteamLink && !g.steamSpec
+        : specFilter === 'saved'
+        ? !isProduct && Boolean(g.steamSpec)
+        : !isProduct && Boolean(g.skipSteamLink);
+    return matchesSearch && matchesTag && matchesSpec;
   });
 
   const steamCount = games.filter((g) => {
@@ -223,6 +326,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }).length;
   const productCount = games.filter((g) => g.tag.toLowerCase().includes('product')).length;
   const freeCount = games.length - steamCount - steamOnlineCount - productCount;
+  const missingSpecsCount = games.filter(
+    (g) => !g.tag.toLowerCase().includes('product') && !g.skipSteamLink && !g.steamSpec
+  ).length;
+  const savedSpecsCount = games.filter(
+    (g) => !g.tag.toLowerCase().includes('product') && Boolean(g.steamSpec)
+  ).length;
+  const skippedSpecsCount = games.filter(
+    (g) => !g.tag.toLowerCase().includes('product') && Boolean(g.skipSteamLink)
+  ).length;
 
   // Edit Game Handlers (Editing existing games in Catalog)
   const handleStartEdit = (game: Game) => {
@@ -235,6 +347,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setFormDesc(game.description || '');
     setFormPrice(game.price !== undefined ? game.price.toString() : '');
     setFormCostPrice(game.costPrice !== undefined ? game.costPrice.toString() : '0');
+    setFormSteamPrice(game.steamPriceUsd !== undefined ? game.steamPriceUsd.toString() : '');
+    setFormDiscountPercent(game.discountPercent !== undefined ? game.discountPercent.toString() : '');
     setPreviewError(false);
     const initialSteamId = extractSteamAppId(game.link);
     setEditSteamLink(initialSteamId && game.link ? game.link : '');
@@ -249,8 +363,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setEditingGame(null);
     setFormName('');
     setFormImg('');
+    setFormLink('');
+    setFormDesc('');
     setFormPrice('');
     setFormCostPrice('0');
+    setFormSteamPrice('');
+    setFormDiscountPercent('');
     setPreviewError(false);
     setEditSteamLink('');
     setEditSteamGenres([]);
@@ -377,6 +495,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return;
     }
 
+    const parsedSteamPrice =
+      formSteamPrice !== '' && !isNaN(parseFloat(formSteamPrice))
+        ? Math.max(0, Math.round(parseFloat(formSteamPrice) * 100) / 100)
+        : undefined;
+    const parsedDiscount =
+      formDiscountPercent !== '' && !isNaN(parseFloat(formDiscountPercent))
+        ? Math.max(0, Math.min(95, Math.round(parseFloat(formDiscountPercent))))
+        : undefined;
+
     if (editingGame) {
       onUpdateGame({
         ...editingGame,
@@ -390,6 +517,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         skipSteamLink: formSkipSteamLink,
         price: formPrice !== '' && !isNaN(parseFloat(formPrice)) ? parseFloat(formPrice) : undefined,
         costPrice: formCostPrice !== '' && !isNaN(parseFloat(formCostPrice)) ? parseFloat(formCostPrice) : 0,
+        steamPriceUsd: parsedSteamPrice,
+        discountPercent: parsedDiscount,
       });
       onShowToast(`Updated "${formName}" successfully!`);
     } else {
@@ -404,6 +533,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         skipSteamLink: formSkipSteamLink,
         price: formPrice !== '' && !isNaN(parseFloat(formPrice)) ? parseFloat(formPrice) : undefined,
         costPrice: formCostPrice !== '' && !isNaN(parseFloat(formCostPrice)) ? parseFloat(formCostPrice) : 0,
+        steamPriceUsd: parsedSteamPrice,
+        discountPercent: parsedDiscount,
       });
       onShowToast(`Added "${formName}" to catalog & storefront!`);
     }
@@ -893,74 +1024,78 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <option value="product">Product ({productCount})</option>
                   <option value="free">Gameថែមពេលទិញ External ({freeCount})</option>
                 </select>
+
+                {/* Steam Spec Status Filter */}
+                <select
+                  value={specFilter}
+                  onChange={(e) =>
+                    setSpecFilter(e.target.value as 'all' | 'missing' | 'saved' | 'skipped')
+                  }
+                  className={`text-xs rounded-lg px-3 py-2 border outline-none ${
+                    specFilter === 'missing'
+                      ? 'bg-amber-950/70 text-amber-200 border-amber-500/60'
+                      : 'bg-[#131b2e] text-gray-300 border-purple-900/50'
+                  }`}
+                >
+                  <option value="all">All Specs Status</option>
+                  <option value="missing">Missing Steam Specs ({missingSpecsCount})</option>
+                  <option value="saved">Saved Specs ({savedSpecsCount})</option>
+                  <option value="skipped">Not Linked ({skippedSpecsCount})</option>
+                </select>
               </div>
 
               {/* Actions */}
               <div className="flex items-center gap-2 flex-wrap">
-                {(() => {
-                  const missingSpecsCount = games.filter(
-                    (g) => !g.tag.toLowerCase().includes('product') && !g.skipSteamLink && !g.steamSpec
-                  ).length;
-                  return (
-                    <button
-                      type="button"
-                      disabled={specSyncProgress !== null || missingSpecsCount === 0}
-                      onClick={async () => {
-                        const targets = games.filter(
-                          (g) => !g.tag.toLowerCase().includes('product') && !g.skipSteamLink && !g.steamSpec
-                        );
-                        if (targets.length === 0) {
-                          onShowToast('All Steam-enabled games already have PC Specs saved in Website DB!');
-                          return;
-                        }
-                        let done = 0;
-                        let saved = 0;
-                        setSpecSyncProgress({ done: 0, total: targets.length, saved: 0 });
-                        const concurrency = 3;
-                        for (let i = 0; i < targets.length; i += concurrency) {
-                          const batch = targets.slice(i, i + concurrency);
-                          await Promise.all(
-                            batch.map(async (target) => {
-                              try {
-                                const spec = await fetchSteamSpec({
-                                  name: target.name,
-                                  link: target.link,
-                                });
-                                onUpdateGame({
-                                  ...target,
-                                  steamSpec: spec,
-                                });
-                                saved++;
-                              } catch {
-                                // Skip unmatched entries
-                              } finally {
-                                done++;
-                                setSpecSyncProgress({ done, total: targets.length, saved });
-                              }
-                            })
-                          );
-                        }
-                        setSpecSyncProgress(null);
-                        onShowToast(`🎉 Synced & saved Steam PC Specs for ${saved}/${targets.length} games into Website DB!`);
-                      }}
-                      className="px-3.5 py-2 rounded-xl bg-cyan-950/70 hover:bg-cyan-900/80 disabled:opacity-50 text-cyan-200 border border-cyan-500/40 font-semibold text-xs flex items-center gap-2 transition cursor-pointer whitespace-nowrap"
-                      title="Pull and permanently save Steam PC System Requirements into Website Firestore Database"
-                    >
-                      <i
-                        className={`fa-solid ${
-                          specSyncProgress ? 'fa-spinner fa-spin' : 'fa-cloud-arrow-down'
-                        } text-cyan-300`}
-                      ></i>
-                      <span>
-                        {specSyncProgress
-                          ? `Syncing ${specSyncProgress.done}/${specSyncProgress.total}...`
-                          : missingSpecsCount > 0
-                          ? `Save Steam Specs (${missingSpecsCount})`
-                          : 'All Specs Saved'}
-                      </span>
-                    </button>
-                  );
-                })()}
+                <button
+                  type="button"
+                  onClick={() => setIsMissingSpecsModalOpen(true)}
+                  className={`px-3.5 py-2 rounded-xl font-semibold text-xs flex items-center gap-2 transition cursor-pointer whitespace-nowrap border ${
+                    missingSpecsCount > 0
+                      ? 'bg-cyan-950/75 hover:bg-cyan-900/80 text-cyan-200 border-cyan-500/45'
+                      : 'bg-emerald-950/60 hover:bg-emerald-900/70 text-emerald-200 border-emerald-500/40'
+                  }`}
+                  title="Click to see which games are missing Steam PC Specs, sync all, or paste a Steam link"
+                >
+                  <i
+                    className={`fa-solid ${
+                      specSyncProgress ? 'fa-spinner fa-spin' : 'fa-cloud-arrow-down'
+                    } ${missingSpecsCount > 0 ? 'text-cyan-300' : 'text-emerald-300'}`}
+                  ></i>
+                  <span>
+                    {specSyncProgress
+                      ? `Syncing ${specSyncProgress.done}/${specSyncProgress.total}...`
+                      : missingSpecsCount > 0
+                      ? `Save Steam Specs (${missingSpecsCount})`
+                      : 'All Specs Saved'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowSteamOnlinePanel((v) => !v)}
+                  className={`px-3.5 py-2 rounded-xl font-semibold text-xs flex items-center gap-2 transition cursor-pointer whitespace-nowrap border ${
+                    showSteamOnlinePanel
+                      ? 'bg-emerald-700/80 hover:bg-emerald-600/80 text-white border-emerald-400 shadow-lg shadow-emerald-950/50'
+                      : steamOnlineSyncConfig.enabled
+                      ? 'bg-emerald-950/75 hover:bg-emerald-900/80 text-emerald-200 border-emerald-500/45'
+                      : 'bg-[#131b2e] hover:bg-gray-800 text-gray-300 border-gray-700'
+                  }`}
+                  title="Configure Steam Online auto-update from Steam Store"
+                >
+                  <i
+                    className={`fa-brands fa-steam ${
+                      isSyncingSteamOnline ? 'fa-spin' : ''
+                    } text-emerald-300`}
+                  ></i>
+                  <span>
+                    Steam Online Auto: {steamOnlineSyncConfig.enabled ? 'ON' : 'OFF'}
+                  </span>
+                  <i
+                    className={`fa-solid ${
+                      showSteamOnlinePanel ? 'fa-chevron-up' : 'fa-chevron-down'
+                    } text-[10px] opacity-80`}
+                  ></i>
+                </button>
 
                 {selectedGameIds.length > 0 && (
                   <button
@@ -974,6 +1109,270 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 )}
               </div>
             </div>
+
+            {/* Steam Online Auto-Update Panel */}
+            {showSteamOnlinePanel && (
+              <div className="bg-[#0f172a] rounded-xl border border-emerald-500/40 p-4 shadow-xl space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-emerald-900/40">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-950 border border-emerald-500/40 text-emerald-300 flex items-center justify-center">
+                      <i className="fa-brands fa-steam text-sm"></i>
+                    </div>
+                    <div>
+                      <h3 className="font-orbitron font-bold text-xs sm:text-sm text-white flex items-center gap-2">
+                        <span>STEAM ONLINE AUTO-UPDATE FROM STEAM</span>
+                        <span
+                          className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${
+                            steamOnlineSyncConfig.enabled
+                              ? 'bg-emerald-950/90 text-emerald-300 border-emerald-500/40'
+                              : 'bg-gray-900 text-gray-400 border-gray-700'
+                          }`}
+                        >
+                          {steamOnlineSyncConfig.enabled ? 'AUTO ON' : 'PAUSED'}
+                        </span>
+                      </h3>
+                      <p className="text-[11px] text-gray-400">
+                        ទាញយកតែហ្គេមលក់តម្លៃ $20 ឡើងទៅ (Paid $20+ Only • 1 Year) ពី https://store.steampowered.com/ ចូល Category &quot;Steam Online&quot;
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleUpdateSteamOnlineConfig({ enabled: !steamOnlineSyncConfig.enabled })
+                      }
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition cursor-pointer ${
+                        steamOnlineSyncConfig.enabled
+                          ? 'bg-emerald-600/90 hover:bg-emerald-500 text-white border-emerald-400'
+                          : 'bg-gray-800 hover:bg-gray-700 text-gray-300 border-gray-600'
+                      }`}
+                    >
+                      {steamOnlineSyncConfig.enabled ? 'Auto-Update: ON' : 'Auto-Update: OFF'}
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isSyncingSteamOnline}
+                      onClick={handleRunSteamOnlineSyncNow}
+                      className="px-3.5 py-1.5 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-md transition cursor-pointer"
+                    >
+                      <i
+                        className={`fa-solid ${
+                          isSyncingSteamOnline ? 'fa-spinner fa-spin' : 'fa-cloud-arrow-down'
+                        }`}
+                      ></i>
+                      <span>{isSyncingSteamOnline ? 'Updating from Steam...' : 'Update Now from Steam'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setShowSteamOnlinePanel(false)}
+                      aria-label="Hide Steam Online Auto-Update Panel"
+                      className="w-7 h-7 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-gray-300 hover:text-white flex items-center justify-center transition cursor-pointer"
+                      title="Hide panel"
+                    >
+                      <i className="fa-solid fa-xmark text-xs"></i>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase text-gray-400 mb-1">
+                      Steam Store Section
+                    </label>
+                    <select
+                      value={steamOnlineSyncConfig.source}
+                      onChange={(e) =>
+                        handleUpdateSteamOnlineConfig({
+                          source: e.target.value as SteamOnlineSyncSource,
+                        })
+                      }
+                      className="w-full bg-[#131b2e] text-gray-200 rounded-lg px-2.5 py-1.5 border border-emerald-900/50 outline-none focus:border-emerald-500"
+                    >
+                      <option value="popular_new_online">Steam Homepage — Popular New Releases</option>
+                      <option value="new_releases_online">Steam Store — All Latest New Releases</option>
+                      <option value="top_sellers_online">Steam Store — New Top Sellers This Month</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase text-gray-400 mb-1">
+                      Auto-Check Interval
+                    </label>
+                    <select
+                      value={steamOnlineSyncConfig.intervalHours}
+                      onChange={(e) =>
+                        handleUpdateSteamOnlineConfig({
+                          intervalHours: Number(e.target.value) || 1,
+                        })
+                      }
+                      className="w-full bg-[#131b2e] text-gray-200 rounded-lg px-2.5 py-1.5 border border-emerald-900/50 outline-none focus:border-emerald-500"
+                    >
+                      <option value={1}>Every 1 Hour</option>
+                      <option value={6}>Every 6 Hours</option>
+                      <option value={12}>Every 12 Hours</option>
+                      <option value={24}>Every 24 Hours</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase text-gray-400 mb-1">
+                      Games Checked Per Sync
+                    </label>
+                      <select
+                      value={steamOnlineSyncConfig.maxGamesPerSync}
+                      onChange={(e) =>
+                        handleUpdateSteamOnlineConfig({
+                          maxGamesPerSync: Number(e.target.value) || 30,
+                        })
+                      }
+                      className="w-full bg-[#131b2e] text-gray-200 rounded-lg px-2.5 py-1.5 border border-emerald-900/50 outline-none focus:border-emerald-500"
+                    >
+                      <option value={10}>Top 10 Paid Games</option>
+                      <option value={20}>Top 20 Paid Games</option>
+                      <option value={30}>Top 30 Paid Games</option>
+                      <option value={50}>Top 50 Paid Games (1 Year)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-[10px] font-mono uppercase text-gray-400 mb-1">
+                      Default Price USD (Optional)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="any"
+                      placeholder="Leave blank if unset"
+                      value={
+                        steamOnlineSyncConfig.defaultPriceUsd !== undefined
+                          ? String(steamOnlineSyncConfig.defaultPriceUsd)
+                          : ''
+                      }
+                      onChange={(e) => {
+                        const raw = e.target.value.trim();
+                        if (raw === '') {
+                          handleUpdateSteamOnlineConfig({ defaultPriceUsd: undefined });
+                        } else {
+                          const num = parseFloat(raw);
+                          if (!isNaN(num) && num >= 0) {
+                            handleUpdateSteamOnlineConfig({ defaultPriceUsd: num });
+                          }
+                        }
+                      }}
+                      className="w-full bg-[#131b2e] text-gray-200 rounded-lg px-2.5 py-1.5 border border-emerald-900/50 outline-none focus:border-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Steam Online Admin Discount Control Bar */}
+                <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl bg-[#0b1322] border border-emerald-500/30">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div>
+                      <div className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                        <i className="fa-solid fa-percent text-[11px]"></i>
+                        <span>Steam Online Discount (%) កំណត់ដោយ Admin</span>
+                      </div>
+                      <p className="text-[11px] text-gray-400">
+                        កំណត់ % បញ្ចុះតម្លៃលើតម្លៃ Steam ដើម (ឧ. Steam $59.99 បញ្ចុះ{' '}
+                        {steamOnlineSyncConfig.discountPercent || 0}% →{' '}
+                        <strong className="text-[#beee11] font-mono">
+                          ${(59.99 * (1 - (steamOnlineSyncConfig.discountPercent || 0) / 100)).toFixed(2)}
+                        </strong>
+                        )
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    {[0, 10, 20, 30, 50].map((pct) => {
+                      const active = (steamOnlineSyncConfig.discountPercent || 0) === pct;
+                      return (
+                        <button
+                          key={pct}
+                          type="button"
+                          onClick={() => handleUpdateSteamOnlineConfig({ discountPercent: pct })}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-mono font-bold border transition cursor-pointer ${
+                            active
+                              ? 'bg-[#4c6b22] text-[#beee11] border-[#8bb83b]'
+                              : 'bg-[#131b2e] text-gray-300 border-slate-700 hover:border-emerald-500/50'
+                          }`}
+                        >
+                          {pct === 0 ? '0% (No Discount)' : `-${pct}%`}
+                        </button>
+                      );
+                    })}
+
+                    <div className="relative w-24">
+                      <input
+                        type="number"
+                        min="0"
+                        max="95"
+                        step="1"
+                        value={String(steamOnlineSyncConfig.discountPercent ?? 0)}
+                        onChange={(e) => {
+                          const raw = e.target.value.trim();
+                          if (raw === '') {
+                            handleUpdateSteamOnlineConfig({ discountPercent: 0 });
+                          } else {
+                            const num = Math.round(Number(raw));
+                            if (Number.isFinite(num)) {
+                              handleUpdateSteamOnlineConfig({
+                                discountPercent: Math.max(0, Math.min(95, num)),
+                              });
+                            }
+                          }
+                        }}
+                        className="w-full bg-[#131b2e] text-white font-mono font-bold text-xs rounded-lg pl-2.5 pr-6 py-1.5 border border-emerald-500/40 outline-none focus:border-emerald-400 tabular-nums"
+                        aria-label="Custom Steam Online Discount Percentage"
+                      />
+                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-emerald-300 font-mono text-xs pointer-events-none">
+                        %
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-[11px] text-gray-400">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <span>
+                      Last Sync:{' '}
+                      <strong className="text-gray-200">
+                        {steamOnlineSyncConfig.lastSyncAt
+                          ? new Date(steamOnlineSyncConfig.lastSyncAt).toLocaleString()
+                          : 'Never'}
+                      </strong>
+                    </span>
+                    {steamOnlineSyncConfig.lastSyncMessage && (
+                      <span
+                        className={`font-mono ${
+                          steamOnlineSyncConfig.lastSyncStatus === 'error'
+                            ? 'text-rose-400'
+                            : 'text-emerald-300'
+                        }`}
+                      >
+                        • {steamOnlineSyncConfig.lastSyncMessage}
+                      </span>
+                    )}
+                  </div>
+                  {(steamOnlineSyncConfig.deletedAppIds?.length || 0) > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleUpdateSteamOnlineConfig({ deletedAppIds: [] });
+                        onShowToast('Cleared skipped deleted Steam Online IDs.', 'info');
+                      }}
+                      className="text-[11px] text-amber-300 hover:text-amber-200 underline cursor-pointer"
+                    >
+                      Reset Skipped ({steamOnlineSyncConfig.deletedAppIds?.length})
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Quick Summary Pill Bar */}
             <div className="flex flex-wrap items-center justify-between text-xs text-gray-400 px-1 gap-2">
@@ -1078,6 +1477,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               <div className="font-semibold text-sm hover:text-purple-300">
                                 {game.name}
                               </div>
+                              {game.description && game.description.trim() && (
+                                <p
+                                  title={game.description}
+                                  className="text-[11px] text-amber-200/85 mt-0.5 line-clamp-1"
+                                >
+                                  {game.description}
+                                </p>
+                              )}
                               {game.link ? (
                                 <a
                                   href={game.link}
@@ -1118,8 +1525,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     e.stopPropagation();
                                     setSpecInspectGame(game);
                                   }}
-                                  className="p-1.5 bg-cyan-950/60 hover:bg-cyan-900/70 text-cyan-300 rounded-lg border border-cyan-600/40 transition cursor-pointer"
-                                  title="View PC System Requirements (Steam Spec)"
+                                  className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                                    game.steamSpec
+                                      ? 'bg-cyan-950/60 hover:bg-cyan-900/70 text-cyan-300 border-cyan-600/40'
+                                      : !game.tag.toLowerCase().includes('product') && !game.skipSteamLink
+                                      ? 'bg-amber-950/50 hover:bg-amber-900/70 text-amber-300 border-amber-500/50'
+                                      : 'bg-slate-900/60 hover:bg-slate-800 text-gray-400 border-slate-700'
+                                  }`}
+                                  title={
+                                    game.steamSpec
+                                      ? 'View PC System Requirements (Steam Spec Saved)'
+                                      : !game.tag.toLowerCase().includes('product') && !game.skipSteamLink
+                                      ? 'Missing Steam Spec — click to fetch & save'
+                                      : 'View PC System Requirements'
+                                  }
                                 >
                                   <i className="fa-solid fa-microchip"></i>
                                 </button>
@@ -1456,6 +1875,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </div>
                 </div>
 
+                {formTag.toLowerCase().includes('steam') && formTag.toLowerCase().includes('online') && (
+                  <div className="grid grid-cols-2 gap-3 p-3 rounded-xl bg-emerald-950/20 border border-emerald-500/30">
+                    <div>
+                      <label className="block text-xs font-semibold text-emerald-300 mb-1">
+                        STEAM STORE PRICE ($ USD)
+                      </label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-emerald-400 font-mono text-xs">$</span>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="59.99"
+                          value={formSteamPrice}
+                          onChange={(e) => setFormSteamPrice(e.target.value)}
+                          className="w-full bg-[#131b2e] text-xs text-gray-200 rounded-xl pl-7 pr-3 py-2 border border-emerald-900/50 outline-none focus:border-emerald-400 font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-lime-300 mb-1">
+                        GAME DISCOUNT % (OPTIONAL OVERRIDE)
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          step="1"
+                          min="0"
+                          max="95"
+                          placeholder={`Global (${steamOnlineSyncConfig.discountPercent ?? 0}%)`}
+                          value={formDiscountPercent}
+                          onChange={(e) => setFormDiscountPercent(e.target.value)}
+                          className="w-full bg-[#131b2e] text-xs text-gray-200 rounded-xl pl-3 pr-7 py-2 border border-emerald-900/50 outline-none focus:border-emerald-400 font-mono"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-lime-300 font-mono text-xs">%</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-xs font-semibold text-gray-300 mb-1">COVER IMAGE URL OR UPLOAD</label>
                   <input
@@ -1690,6 +2150,32 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
 
               <CoverMediaForm
+                settings={localSettings}
+                onSaveSettings={(updated) => {
+                  setLocalSettings(updated);
+                  onSaveSettings(updated);
+                }}
+                onShowToast={onShowToast}
+              />
+            </div>
+
+            {/* STEAM ONLINE CUSTOM COVER (PHOTO / VIDEO / TEXT & DISCOUNT STYLE) */}
+            <div className="bg-[#0f172a] p-6 sm:p-8 rounded-2xl border border-sky-500/40 shadow-2xl">
+              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-800">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#0ea5e9]/30 to-[#ff5a00]/30 border border-sky-400/40 flex items-center justify-center text-sky-300">
+                  <i className="fa-brands fa-steam text-xl"></i>
+                </div>
+                <div>
+                  <h3 className="font-orbitron font-bold text-lg text-white">
+                    STEAM ONLINE COVER (PHOTO / VIDEO / TEXT & DISCOUNT)
+                  </h3>
+                  <p className="text-xs text-gray-400">
+                    Add Photo or Video, custom Headline & Subtitle text, and the Discount style ribbon for Steam Online.
+                  </p>
+                </div>
+              </div>
+
+              <SteamOnlineCoverForm
                 settings={localSettings}
                 onSaveSettings={(updated) => {
                   setLocalSettings(updated);
@@ -2287,13 +2773,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         onClose={() => setSpecInspectGame(null)}
         adminHandle={settings.telegramAdminHandle}
         onSaveGameSpec={(targetGame, spec) => {
+          const latestGame =
+            StorageService.getGames().find((g) => g.id === targetGame.id) || targetGame;
           const updated: Game = {
-            ...targetGame,
+            ...latestGame,
             steamSpec: spec,
           };
           onUpdateGame(updated);
           setSpecInspectGame((prev) => (prev && prev.id === updated.id ? updated : prev));
         }}
+      />
+      {/* Steam Online Sync Results Popup */}
+      <SteamOnlineSyncModal
+        state={steamSyncModal}
+        onClose={() => setSteamSyncModal((prev) => ({ ...prev, isOpen: false }))}
+        onUploadGames={handleUploadSteamFeedGames}
+      />
+      {/* Missing Steam Specs Inspector & Sync Modal */}
+      <MissingSteamSpecsModal
+        isOpen={isMissingSpecsModalOpen}
+        onClose={() => setIsMissingSpecsModalOpen(false)}
+        games={games}
+        onUpdateGame={onUpdateGame}
+        onEditGame={handleStartEdit}
+        onFilterCatalogMissing={() => {
+          setTagFilter('all');
+          setSpecFilter('missing');
+          setIsMissingSpecsModalOpen(false);
+        }}
+        onShowToast={onShowToast}
+        syncProgress={specSyncProgress}
+        setSyncProgress={setSpecSyncProgress}
       />
     </div>
   );

@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Game } from '../types/game';
+import { computeSteamOnlinePricing } from '../utils/pricingUtils';
 
 interface GameCardProps {
   game: Game;
@@ -7,6 +8,7 @@ interface GameCardProps {
   onToggleSelect: (game: Game) => void;
   onOpenPreview: (game: Game) => void;
   onSendToTelegram?: (game: Game) => void;
+  steamOnlineDiscountPercent?: number;
 }
 
 export const GameCard: React.FC<GameCardProps> = ({
@@ -15,6 +17,7 @@ export const GameCard: React.FC<GameCardProps> = ({
   onToggleSelect,
   onOpenPreview,
   onSendToTelegram,
+  steamOnlineDiscountPercent = 0,
 }) => {
   const [imgError, setImgError] = useState(false);
 
@@ -23,26 +26,195 @@ export const GameCard: React.FC<GameCardProps> = ({
   const isSteam = lowerTag.includes('steam') && !lowerTag.includes('online');
   const isProduct = lowerTag.includes('product');
 
-  const categoryLabel = isSteamOnline
-    ? 'Steam Online'
-    : isSteam
+  // Dedicated Redesigned Game Box Style for Steam Online
+  if (isSteamOnline) {
+    const pricing = computeSteamOnlinePricing(game, steamOnlineDiscountPercent);
+
+    return (
+      <article
+        onClick={() => onToggleSelect(game)}
+        className={`group relative flex flex-col rounded-xl bg-[#070a10] border transition-all duration-200 hover:-translate-y-1 cursor-pointer select-none mt-2 ${
+          isSelected
+            ? 'border-[#ff5a00] ring-1 ring-[#ff5a00]/60 shadow-[0_14px_30px_rgba(255,90,0,0.28)]'
+            : 'border-slate-800/90 hover:border-[#0099ff]/60 shadow-[0_12px_28px_rgba(2,5,12,0.85)]'
+        }`}
+      >
+        {/* G2A-Style Slanted Dual-Tone Discount Ribbon at Top Center */}
+        {pricing.hasDiscount && (
+          <div
+            aria-label={`Discount ${pricing.discountPercent}%`}
+            className="absolute -top-3 left-1/2 -translate-x-1/2 z-20 flex items-stretch pointer-events-none drop-shadow-[0_6px_14px_rgba(0,0,0,0.8)] tabular-nums"
+          >
+            <div className="px-2.5 py-1 bg-gradient-to-b from-[#0ea5e9] to-[#0077e6] -skew-x-12 flex items-center justify-center rounded-l-[3px]">
+              <span className="skew-x-12 text-white font-sans font-extrabold text-[11px] sm:text-xs leading-none tracking-tight whitespace-nowrap">
+                Up to
+              </span>
+            </div>
+            <div className="px-3 py-1 bg-gradient-to-b from-[#ff6a13] to-[#ea4200] -skew-x-12 -ml-1 flex items-center justify-center rounded-r-[3px] shadow-[-2px_0_6px_rgba(0,0,0,0.3)]">
+              <span className="skew-x-12 text-white font-sans font-black text-base sm:text-lg leading-none tracking-tight whitespace-nowrap">
+                -{pricing.discountPercent}%
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Inner Rounded Card Shell */}
+        <div className="flex flex-col flex-1 rounded-xl overflow-hidden">
+          {/* Artwork Top Container */}
+          <div className="relative aspect-[3/3.45] w-full bg-[#06090e] overflow-hidden">
+            {imgError || !game.img ? (
+              <div className="w-full h-full flex flex-col items-center justify-center p-4 text-center bg-[radial-gradient(circle_at_50%_35%,_#15293d_0%,_#06090e_80%)]">
+                <i className="fa-brands fa-steam text-3xl text-sky-400/90 mb-2"></i>
+                <span className="font-g2a-display font-bold text-xs text-slate-200 line-clamp-2 uppercase">
+                  {game.name}
+                </span>
+              </div>
+            ) : (
+              <img
+                src={game.img}
+                alt={game.name}
+                referrerPolicy="no-referrer"
+                onError={() => setImgError(true)}
+                loading="lazy"
+                className="w-full h-full object-cover object-top group-hover:scale-[1.04] transition-transform duration-300"
+              />
+            )}
+
+            {/* Smooth Dark Gradient Blend into Lower Info Area */}
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-[#070a10] via-[#070a10]/70 to-transparent"
+            />
+          </div>
+
+          {/* Info, Steam Full Price & Discounted Selling Price */}
+          <div className="flex-1 flex flex-col justify-between px-3 pb-3 pt-0.5 gap-2.5 bg-[#070a10]">
+            <div className="space-y-1">
+              <h4
+                title={game.name}
+                className="font-g2a-display font-extrabold uppercase text-white group-hover:text-sky-300 text-sm sm:text-[15px] leading-tight line-clamp-2 min-h-[2.35rem] tracking-tight transition-colors"
+              >
+                {game.name}
+              </h4>
+
+              <div className="flex items-center gap-1.5 text-[11px] text-slate-400 truncate">
+                <span className="text-sky-400 font-semibold">Steam</span>
+                <span aria-hidden="true">·</span>
+                <span className="truncate">{game.genre || 'Online Key'}</span>
+                <span aria-hidden="true">·</span>
+                <span className="text-slate-400 shrink-0">GLOBAL</span>
+              </div>
+            </div>
+
+            {/* Price Strip: Steam Full Price + Discounted Price (discount % ribbon sits at top of card) */}
+            <div className="space-y-2 mt-auto">
+              <div className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-[#0d121c] border border-slate-800/90 tabular-nums">
+                {pricing.steamOriginalPrice !== undefined ? (
+                  pricing.hasDiscount ? (
+                    <>
+                      <div className="flex flex-col leading-tight min-w-0">
+                        <span className="text-[10px] text-slate-400 font-medium">
+                          Steam Full
+                        </span>
+                        <span className="text-xs font-mono text-slate-400 line-through">
+                          ${pricing.steamOriginalPrice.toFixed(2)}
+                        </span>
+                      </div>
+                      <span className="font-mono font-extrabold text-sm sm:text-[15px] text-white shrink-0">
+                        ${pricing.finalPrice?.toFixed(2)}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="text-[11px] text-slate-400 font-medium">
+                        Steam Full
+                      </span>
+                      <span className="font-mono font-extrabold text-sm sm:text-[15px] text-sky-300 shrink-0">
+                        ${pricing.steamOriginalPrice.toFixed(2)}
+                      </span>
+                    </>
+                  )
+                ) : (
+                  <>
+                    <span className="text-[11px] text-slate-400 font-medium">
+                      Steam Store
+                    </span>
+                    <span className="text-xs font-mono font-semibold text-sky-300">
+                      $20.00+
+                    </span>
+                  </>
+                )}
+              </div>
+
+              {/* Action Buttons Row */}
+              <div
+                className="flex items-center gap-1.5"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <button
+                  type="button"
+                  onClick={() => onToggleSelect(game)}
+                  className={`flex-1 h-8 px-2.5 rounded-lg text-[11px] font-rajdhani font-bold tracking-wide transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                    isSelected
+                      ? 'bg-[#ff5a00] text-white shadow-md shadow-orange-950/50'
+                      : 'bg-[#121a28] hover:bg-[#0088ff] text-slate-100 hover:text-white border border-slate-700/80 hover:border-[#0088ff]'
+                  }`}
+                >
+                  <i
+                    className={`fa-solid ${
+                      isSelected ? 'fa-circle-check' : 'fa-plus'
+                    } text-[10px]`}
+                  ></i>
+                  <span>{isSelected ? 'បានជ្រើស' : 'ជ្រើសរើស'}</span>
+                </button>
+
+                {onSendToTelegram && (
+                  <button
+                    type="button"
+                    onClick={() => onSendToTelegram(game)}
+                    className="w-8 h-8 shrink-0 rounded-lg bg-[#111926] hover:bg-sky-600 text-sky-300 hover:text-white border border-slate-700/80 hover:border-sky-400 flex items-center justify-center transition cursor-pointer"
+                    title="ផ្ញើទៅ Telegram @kanigame168"
+                    aria-label={`Send ${game.name} to Telegram`}
+                  >
+                    <i className="fa-brands fa-telegram text-xs"></i>
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onOpenPreview(game);
+                  }}
+                  className="w-8 h-8 shrink-0 rounded-lg bg-[#111926] hover:bg-cyan-700 text-cyan-300 hover:text-white border border-slate-700/80 hover:border-cyan-400 flex items-center justify-center transition cursor-pointer"
+                  title="PC System Requirements & Price Details"
+                  aria-label={`View PC System Requirements for ${game.name}`}
+                >
+                  <i className="fa-solid fa-microchip text-[11px]"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </article>
+    );
+  }
+
+  // Standard Card Design for Steam Offline, Product, and GameថែមExternal
+  const categoryLabel = isSteam
     ? 'Steam Offline'
     : isProduct
     ? 'Product'
     : 'Free Gift';
 
-  const typeIconClass =
-    isSteam || isSteamOnline
-      ? 'fa-brands fa-steam'
-      : isProduct
-      ? 'fa-solid fa-box-open'
-      : 'fa-solid fa-gift';
+  const typeIconClass = isSteam
+    ? 'fa-brands fa-steam'
+    : isProduct
+    ? 'fa-solid fa-box-open'
+    : 'fa-solid fa-gift';
 
-  // Harmonized Neon Theme Tokens matching image_e9c28aaf.png & HeroBanner
   const frameGradient = isSelected
     ? 'from-fuchsia-500 via-purple-500 to-cyan-400'
-    : isSteamOnline
-    ? 'from-emerald-400/85 via-teal-500/85 to-cyan-500/85'
     : isSteam
     ? 'from-purple-500/80 via-fuchsia-500/85 to-purple-700/85'
     : isProduct
@@ -51,8 +223,6 @@ export const GameCard: React.FC<GameCardProps> = ({
 
   const topTabColor = isSelected
     ? 'bg-gradient-to-r from-fuchsia-400 via-purple-400 to-cyan-300 shadow-[0_2px_14px_rgba(217,70,239,0.8)]'
-    : isSteamOnline
-    ? 'bg-emerald-400 shadow-[0_2px_12px_rgba(52,211,153,0.65)]'
     : isSteam
     ? 'bg-fuchsia-500 shadow-[0_2px_12px_rgba(217,70,239,0.65)]'
     : isProduct
@@ -61,8 +231,6 @@ export const GameCard: React.FC<GameCardProps> = ({
 
   const outerShadow = isSelected
     ? 'shadow-[0_0_24px_rgba(217,70,239,0.55)]'
-    : isSteamOnline
-    ? 'shadow-[0_10px_24px_rgba(8,5,20,0.85)] group-hover:shadow-[0_12px_28px_rgba(52,211,153,0.38)]'
     : isSteam
     ? 'shadow-[0_10px_24px_rgba(8,5,20,0.85)] group-hover:shadow-[0_12px_28px_rgba(217,70,239,0.38)]'
     : isProduct
@@ -138,7 +306,6 @@ export const GameCard: React.FC<GameCardProps> = ({
           {/* Inset Rounded Artwork Frame */}
           <div className="relative flex-1 mx-2 mb-2 rounded-lg overflow-hidden bg-[#080513] border border-purple-400/20">
             {imgError || !game.img ? (
-              /* Styled Triangle Cyber Fallback inspired by mockup's "?" glitch card */
               <div className="relative w-full h-full bg-[radial-gradient(circle_at_50%_40%,_#241145_0%,_#0e071e_72%,_#070412_100%)] flex flex-col items-center justify-center px-3 pb-14 text-center">
                 <div className="relative flex items-center justify-center mb-2">
                   <svg

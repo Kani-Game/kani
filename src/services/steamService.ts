@@ -4,9 +4,11 @@ import type {
   SteamSpecItem,
   SteamRequirementBlock,
   SteamSpecData,
+  SteamOnlineFeedItem,
+  SteamOnlineSyncSource,
 } from '../types/game';
 
-export type { SteamSpecItem, SteamRequirementBlock, SteamSpecData };
+export type { SteamSpecItem, SteamRequirementBlock, SteamSpecData, SteamOnlineFeedItem, SteamOnlineSyncSource };
 export type SteamSpecResponse = SteamSpecData;
 
 const STEAM_SPEC_CACHE_KEY = 'kani_steam_spec_cache_v1';
@@ -346,3 +348,120 @@ export async function fetchSteamSpec(params: {
   inFlightRequests.set(requestKey, promise);
   return promise;
 }
+
+export interface SteamOnlineFeedResponse {
+  fetchedAt: number;
+  source: SteamOnlineSyncSource;
+  count: number;
+  games: SteamOnlineFeedItem[];
+}
+
+export async function fetchSteamOnlineFeed(params?: {
+  source?: SteamOnlineSyncSource;
+  limit?: number;
+  refresh?: boolean;
+}): Promise<SteamOnlineFeedResponse> {
+  const source: SteamOnlineSyncSource = params?.source || 'popular_new_online';
+  const limit = Math.max(1, Math.min(50, params?.limit || 30));
+  const query = new URLSearchParams();
+  query.set('source', source);
+  query.set('limit', String(limit));
+  if (params?.refresh) {
+    query.set('refresh', '1');
+  }
+  const queryStr = query.toString();
+
+  const tryEndpoint = async (endpoint: string) => {
+    const res = await fetch(`${endpoint}?${queryStr}`);
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    const rawText = await res.text();
+    let payload: any = null;
+    if (rawText) {
+      try {
+        payload = JSON.parse(rawText);
+      } catch {
+        payload = null;
+      }
+    }
+    const looksLikeHtml =
+      contentType.includes('text/html') ||
+      rawText.trimStart().startsWith('<!doctype') ||
+      rawText.trimStart().startsWith('<html');
+
+    if (!res.ok) {
+      return { error: payload?.error || `Steam feed request failed (HTTP ${res.status}).` };
+    }
+    if (looksLikeHtml || payload === null) {
+      return { nonJson: true };
+    }
+    if (!Array.isArray(payload.games)) {
+      return { error: payload?.error || 'Steam feed returned invalid format.' };
+    }
+    return { data: payload as SteamOnlineFeedResponse };
+  };
+
+  let result = await tryEndpoint('/api/steam-online-games');
+  if (result.nonJson) {
+    result = await tryEndpoint('/.netlify/functions/steam-online-feed');
+  }
+  if (result.nonJson) {
+    throw new Error('Steam Online feed endpoint is unreachable on this host.');
+  }
+  if (!result.data) {
+    throw new Error(result.error || 'Could not load new games from Steam.');
+  }
+  return result.data;
+}
+
+export interface SteamPriceLookupItem {
+  id: string;
+  name: string;
+  link?: string;
+  steamAppId?: number;
+}
+
+export interface SteamPriceLookupResult {
+  appId: number;
+  steamPriceUsd: number;
+}
+
+export async function fetchSteamPricesBatch(
+  items: SteamPriceLookupItem[]
+): Promise<Record<string, SteamPriceLookupResult>> {
+  if (!items.length) return {};
+
+  const tryPost = async (endpoint: string) => {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: items.slice(0, 50) }),
+    });
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    const rawText = await res.text();
+    let payload: any = null;
+    if (rawText) {
+      try {
+        payload = JSON.parse(rawText);
+      } catch {
+        payload = null;
+      }
+    }
+    const looksLikeHtml =
+      contentType.includes('text/html') ||
+      rawText.trimStart().startsWith('<!doctype') ||
+      rawText.trimStart().startsWith('<html');
+
+    if (looksLikeHtml || payload === null) return { nonJson: true };
+    if (!res.ok || !payload?.prices || typeof payload.prices !== 'object') {
+      return { error: payload?.error || `HTTP ${res.status}` };
+    }
+    return { prices: payload.prices as Record<string, SteamPriceLookupResult> };
+  };
+
+  let res = await tryPost('/api/steam-prices');
+  if (res.nonJson) {
+    res = await tryPost('/.netlify/functions/steam-prices');
+  }
+  return res.prices || {};
+}
+

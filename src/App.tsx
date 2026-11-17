@@ -4,7 +4,7 @@
  */
 
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { Game, GameTab, SiteSettings, UserRole } from './types/game';
+import { Game, GameTab, SiteSettings, UserRole, SteamOnlineAutoSyncConfig } from './types/game';
 import { StorageService } from './services/storageService';
 import { Header } from './components/Header';
 import { HeroBanner } from './components/HeroBanner';
@@ -17,6 +17,10 @@ import { AdminDashboard } from './components/AdminDashboard';
 import { POSTerminal } from './components/POSTerminal';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { CoverMediaModal } from './components/CoverMediaModal';
+import { SteamOnlineSyncModal, SteamSyncModalState, SteamSyncFeedItem } from './components/SteamOnlineSyncModal';
+import { SteamOnlineCover } from './components/SteamOnlineCover';
+import { SteamOnlineCoverModal } from './components/SteamOnlineCoverModal';
+import { computeSteamOnlinePricing } from './utils/pricingUtils';
 
 const getTabFromUrl = (): GameTab => {
   if (typeof window === 'undefined') return 'steam';
@@ -105,6 +109,7 @@ export default function App() {
   const [isAdminView, setIsAdminView] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isCoverMediaModalOpen, setIsCoverMediaModalOpen] = useState(false);
+  const [isSteamOnlineCoverModalOpen, setIsSteamOnlineCoverModalOpen] = useState(false);
   const [loginTarget, setLoginTarget] = useState<'admin' | 'pos'>('admin');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(() =>
@@ -116,6 +121,16 @@ export default function App() {
 
   // Toasts
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const [steamOnlineSyncConfig, setSteamOnlineSyncConfig] = useState<SteamOnlineAutoSyncConfig>(() =>
+    StorageService.getSteamOnlineSyncConfig()
+  );
+  const [isSyncingSteamOnline, setIsSyncingSteamOnline] = useState(false);
+  const [steamSyncModal, setSteamSyncModal] = useState<SteamSyncModalState>({
+    isOpen: false,
+    isLoading: false,
+    addedCount: 0,
+    feedGames: [],
+  });
 
   // Load initial data and sync URL hash
   useEffect(() => {
@@ -150,6 +165,11 @@ export default function App() {
 
     // Real-Time Cloud Firestore Sync for User Accounts & Passwords (guarantees all tabs & devices are in lockstep)
     const unsubscribeCloudUserAccounts = StorageService.subscribeToUserAccounts(() => {});
+
+    // Real-Time Cloud Firestore Sync for Steam Online Auto-Update config
+    const unsubscribeSteamOnlineSync = StorageService.subscribeToSteamOnlineSyncConfig((cfg) => {
+      setSteamOnlineSyncConfig(cfg);
+    });
 
     const initialTab = getTabFromUrl();
     const initialPos = getIsPosFromUrl();
@@ -282,17 +302,109 @@ export default function App() {
 
     window.addEventListener('keydown', handleKeyDown);
 
+    // Automatic Steam Online sync after initial cloud hydration + periodic 15-min background check
+    const initialSyncTimer = window.setTimeout(async () => {
+      const cfg = StorageService.getSteamOnlineSyncConfig();
+      if (!cfg.enabled) return;
+      setIsSyncingSteamOnline(true);
+      try {
+        const res = await StorageService.syncSteamOnlineGames();
+        setSteamOnlineSyncConfig(res.config);
+        if (!res.skipped && res.addedCount > 0) {
+          setGames(StorageService.getGames());
+          showToast(`🎮 Steam Online Auto-Update: បានបន្ថែម Game ថ្មី ${res.addedCount} ពី Steam!`, 'success');
+        }
+      } finally {
+        setIsSyncingSteamOnline(false);
+      }
+    }, 1800);
+
+    const periodicSyncTimer = window.setInterval(async () => {
+      const cfg = StorageService.getSteamOnlineSyncConfig();
+      if (!cfg.enabled) return;
+      const res = await StorageService.syncSteamOnlineGames();
+      setSteamOnlineSyncConfig(res.config);
+      if (!res.skipped && res.addedCount > 0) {
+        setGames(StorageService.getGames());
+        showToast(`🎮 Steam Online Auto-Update: បានបន្ថែម Game ថ្មី ${res.addedCount} ពី Steam!`, 'success');
+      }
+    }, 10 * 60 * 1000);
+
     return () => {
+      window.clearTimeout(initialSyncTimer);
+      window.clearInterval(periodicSyncTimer);
       unsubscribeCloudGames();
       unsubscribeCloudSettings();
       unsubscribeCloudReportRows();
       unsubscribeCloudExpenses();
       unsubscribeCloudUserAccounts();
+      unsubscribeSteamOnlineSync();
       window.removeEventListener('hashchange', syncFromUrl);
       window.removeEventListener('popstate', syncFromUrl);
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, []);
+
+  // Automatically check for new Steam games when switching to Steam Online tab (if interval elapsed or catalog is empty)
+  useEffect(() => {
+    if (activeTab !== 'steam-online') return;
+    const cfg = StorageService.getSteamOnlineSyncConfig();
+    if (!cfg.enabled) return;
+    let cancelled = false;
+    (async () => {
+      const intervalMs = Math.max(1, cfg.intervalHours || 1) * 60 * 60 * 1000;
+      const hasAnySteamOnline = StorageService.getGames().some((g) => {
+        const lower = (g.tag || '').toLowerCase();
+        return lower.includes('steam') && lower.includes('online');
+      });
+      const isDue = !hasAnySteamOnline || !cfg.lastSyncAt || Date.now() - cfg.lastSyncAt >= intervalMs;
+      if (!isDue) return;
+      setIsSyncingSteamOnline(true);
+      try {
+        const res = await StorageService.syncSteamOnlineGames({ force: !hasAnySteamOnline });
+        if (!cancelled) {
+          setSteamOnlineSyncConfig(res.config);
+          if (!res.skipped && res.addedCount > 0) {
+            setGames(StorageService.getGames());
+            showToast(`🎮 Steam Online Auto-Update: បានបន្ថែម Game ថ្មី ${res.addedCount} ពី Steam!`, 'success');
+          }
+        }
+      } finally {
+        if (!cancelled) setIsSyncingSteamOnline(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab]);
+
+  const checkedSteamPriceIdsRef = useRef<Set<string>>(new Set());
+
+  // Backfill official Steam prices onto existing Steam Online games if any are missing steamPriceUsd
+  useEffect(() => {
+    if (activeTab !== 'steam-online') return;
+    const missingTargets = games.filter((g) => {
+      const lower = g.tag.toLowerCase();
+      return (
+        lower.includes('steam') &&
+        lower.includes('online') &&
+        !g.steamPriceUsd &&
+        !checkedSteamPriceIdsRef.current.has(g.id)
+      );
+    });
+    if (missingTargets.length === 0) return;
+    missingTargets.forEach((g) => checkedSteamPriceIdsRef.current.add(g.id));
+    let cancelled = false;
+    (async () => {
+      const patched = await StorageService.backfillSteamOnlinePrices();
+      if (!cancelled && patched > 0) {
+        setGames(StorageService.getGames());
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, games]);
 
   const getHashForTab = (tab: GameTab) =>
     tab === 'steam'
@@ -497,10 +609,17 @@ export default function App() {
       list.sort((a, b) => a.name.localeCompare(b.name));
     } else if (sortBy === 'name-desc') {
       list.sort((a, b) => b.name.localeCompare(a.name));
+    } else if (activeTab === 'steam-online') {
+      const globalDisc = steamOnlineSyncConfig.discountPercent ?? 0;
+      list.sort((a, b) => {
+        const discA = computeSteamOnlinePricing(a, globalDisc).discountPercent;
+        const discB = computeSteamOnlinePricing(b, globalDisc).discountPercent;
+        return discB - discA;
+      });
     }
 
     return list;
-  }, [activeTab, steamGames, steamOnlineGames, freeGames, productGames, searchTerm, genreFilter, sortBy]);
+  }, [activeTab, steamGames, steamOnlineGames, freeGames, productGames, searchTerm, genreFilter, sortBy, steamOnlineSyncConfig.discountPercent]);
 
   // Game Selection handlers
   const toggleSelectGame = (game: Game) => {
@@ -817,19 +936,37 @@ export default function App() {
       ) : (
         <main className="flex-1 w-full max-w-[3600px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12 py-6">
 
-          {/* Hero Banner */}
-          <HeroBanner
-            settings={settings}
-            steamCount={steamGames.length}
-            freeCount={freeGames.length}
-            totalCount={games.length}
-            canEditCover={isLoggedIn && currentUserRole !== 'pos'}
-            onEditCover={() => setIsCoverMediaModalOpen(true)}
-            onOpenTelegram={() => {
-              const handle = settings.telegramAdminHandle.replace('@', '');
-              window.open(`https://t.me/${handle}`, '_blank');
-            }}
-          />
+          {/* Distinct Hero Showcase: Customizable Steam Online Cover (Photo/Video/Text+Discount) vs Standard HeroBanner */}
+          {activeTab === 'steam-online' ? (
+            <SteamOnlineCover
+              settings={settings}
+              games={steamOnlineGames}
+              globalDiscountPercent={steamOnlineSyncConfig.discountPercent ?? 0}
+              canEditCover={isLoggedIn && currentUserRole !== 'pos'}
+              onEditCover={() => setIsSteamOnlineCoverModalOpen(true)}
+              onOpenTelegram={() => {
+                const handle = settings.telegramAdminHandle.replace('@', '');
+                window.open(`https://t.me/${handle}`, '_blank');
+              }}
+              onBrowseCatalog={() => {
+                const el = document.getElementById('catalog-section');
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
+            />
+          ) : (
+            <HeroBanner
+              settings={settings}
+              steamCount={steamGames.length}
+              freeCount={freeGames.length}
+              totalCount={games.length}
+              canEditCover={isLoggedIn && currentUserRole !== 'pos'}
+              onEditCover={() => setIsCoverMediaModalOpen(true)}
+              onOpenTelegram={() => {
+                const handle = settings.telegramAdminHandle.replace('@', '');
+                window.open(`https://t.me/${handle}`, '_blank');
+              }}
+            />
+          )}
 
           {/* Category Header & Filter Controls */}
           <div
@@ -847,6 +984,16 @@ export default function App() {
                   <>
                     <i className="fa-brands fa-steam text-emerald-400 text-2xl"></i>
                     <span>Steam Online Games</span>
+                    {steamOnlineSyncConfig.enabled && (
+                      <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-500/40 inline-flex items-center gap-1">
+                        <i
+                          className={`fa-solid ${
+                            isSyncingSteamOnline ? 'fa-arrows-rotate fa-spin' : 'fa-bolt'
+                          } text-[9px]`}
+                        ></i>
+                        <span>{isSyncingSteamOnline ? 'Syncing Steam...' : 'Auto-Update Steam'}</span>
+                      </span>
+                    )}
                   </>
                 ) : activeTab === 'product' ? (
                   <>
@@ -860,15 +1007,57 @@ export default function App() {
                   </>
                 )}
               </h3>
-              <p className="text-xs text-gray-400 mt-1">
-                {activeTab === 'steam'
-                  ? 'ចុចប៊ូតុង Checkbox ឬ Select ដើម្បីជ្រើសរើស Game ច្រើនក្នុងពេលតែមួយ'
-                  : activeTab === 'steam-online'
-                  ? 'បញ្ជី Steam Online Games & Accounts សម្រាប់លេង Online Multiplayer'
-                  : activeTab === 'product'
-                  ? 'ទំនិញគ្រឿងបន្លាស់ ឧបករណ៍ហ្គេម External HDD និង Accessories គុណភាពខ្ពស់'
-                  : 'បញ្ជី Game ឥតគិតថ្លៃសម្រាប់ទាញយក ឬ Request តាម Telegram'}
-              </p>
+              <div className="flex flex-wrap items-center gap-2 mt-1">
+                <p className="text-xs text-gray-400">
+                  {activeTab === 'steam'
+                    ? 'ចុចប៊ូតុង Checkbox ឬ Select ដើម្បីជ្រើសរើស Game ច្រើនក្នុងពេលតែមួយ'
+                    : activeTab === 'steam-online'
+                    ? 'បញ្ជី Steam Online Games & Accounts — ទាញយក Game ថ្មីៗពី Steam ដោយស្វ័យប្រវត្តិ'
+                    : activeTab === 'product'
+                    ? 'ទំនិញគ្រឿងបន្លាស់ ឧបករណ៍ហ្គេម External HDD និង Accessories គុណភាពខ្ពស់'
+                    : 'បញ្ជី Game ឥតគិតថ្លៃសម្រាប់ទាញយក ឬ Request តាម Telegram'}
+                </p>
+                {activeTab === 'steam-online' && isLoggedIn && currentUserRole !== 'pos' && (
+                  <button
+                    type="button"
+                    disabled={isSyncingSteamOnline}
+                    onClick={async () => {
+                      setIsSyncingSteamOnline(true);
+                      setSteamSyncModal({
+                        isOpen: true,
+                        isLoading: true,
+                        addedCount: 0,
+                        feedGames: [],
+                      });
+                      try {
+                        const res = await StorageService.syncSteamOnlineGames({ force: true });
+                        setSteamOnlineSyncConfig(res.config);
+                        setGames(StorageService.getGames());
+                        setSteamSyncModal({
+                          isOpen: true,
+                          isLoading: false,
+                          addedCount: res.addedCount,
+                          feedGames: res.feedGames || [],
+                          error: res.error,
+                        });
+                        if (res.error) {
+                          showToast(`Steam Sync failed: ${res.error}`, 'error');
+                        } else if (res.addedCount > 0) {
+                          showToast(`🎮 បានទាញយក Game ថ្មី ${res.addedCount} ចូល Steam Online!`, 'success');
+                        } else {
+                          showToast('Steam Online មាន Game ថ្មីៗគ្រប់អស់ហើយ (Up to date)!', 'info');
+                        }
+                      } finally {
+                        setIsSyncingSteamOnline(false);
+                      }
+                    }}
+                    className="text-[11px] font-semibold px-2.5 py-0.5 rounded-md bg-emerald-950/80 hover:bg-emerald-900 text-emerald-300 border border-emerald-500/40 inline-flex items-center gap-1.5 transition cursor-pointer disabled:opacity-50"
+                  >
+                    <i className={`fa-solid fa-rotate ${isSyncingSteamOnline ? 'fa-spin' : ''} text-[10px]`}></i>
+                    <span>{isSyncingSteamOnline ? 'Updating...' : 'Update Now'}</span>
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Search, Filter & Quick Selection Controls */}
@@ -968,24 +1157,38 @@ export default function App() {
 
           {/* No results placeholder */}
           {displayedGames.length === 0 ? (
-            <div className="text-center py-20 bg-[#131b2e]/40 rounded-2xl border border-purple-900/30 p-8 my-8">
-              <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-purple-950/60 border border-purple-500/30 flex items-center justify-center text-purple-400 text-2xl">
-                <i className="fa-solid fa-magnifying-glass"></i>
+            activeTab === 'steam-online' && isSyncingSteamOnline && !searchTerm && genreFilter === 'all' ? (
+              <div className="text-center py-20 bg-[#131b2e]/40 rounded-2xl border border-emerald-900/40 p-8 my-8">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-emerald-950/70 border border-emerald-500/40 flex items-center justify-center text-emerald-400 text-2xl">
+                  <i className="fa-solid fa-spinner fa-spin"></i>
+                </div>
+                <h4 className="text-lg font-bold text-emerald-200">
+                  កំពុងទាញយក Game ថ្មីៗតម្លៃ $20+ ពី Steam...
+                </h4>
+                <p className="text-xs text-gray-400 mt-1 max-w-md mx-auto">
+                  Fetching latest paid releases ($20.00+ USD, past 1 year) from https://store.steampowered.com/
+                </p>
               </div>
-              <h4 className="text-lg font-bold text-gray-200">រកមិនឃើញ Game នេះទេ</h4>
-              <p className="text-xs text-gray-400 mt-1 max-w-md mx-auto">
-                សូមព្យាយាមស្វែងរកពាក្យផ្សេងទៀត ឬជ្រើសរើសប្រភេទ Genre ផ្សេង។
-              </p>
-              <button
-                onClick={() => {
-                  setSearchTerm('');
-                  setGenreFilter('all');
-                }}
-                className="mt-4 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold transition"
-              >
-                Clear Search & Filters
-              </button>
-            </div>
+            ) : (
+              <div className="text-center py-20 bg-[#131b2e]/40 rounded-2xl border border-purple-900/30 p-8 my-8">
+                <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-purple-950/60 border border-purple-500/30 flex items-center justify-center text-purple-400 text-2xl">
+                  <i className="fa-solid fa-magnifying-glass"></i>
+                </div>
+                <h4 className="text-lg font-bold text-gray-200">រកមិនឃើញ Game នេះទេ</h4>
+                <p className="text-xs text-gray-400 mt-1 max-w-md mx-auto">
+                  សូមព្យាយាមស្វែងរកពាក្យផ្សេងទៀត ឬជ្រើសរើសប្រភេទ Genre ផ្សេង។
+                </p>
+                <button
+                  onClick={() => {
+                    setSearchTerm('');
+                    setGenreFilter('all');
+                  }}
+                  className="mt-4 px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold transition"
+                >
+                  Clear Search & Filters
+                </button>
+              </div>
+            )
           ) : (
             /* Games Grid responsive column system scaling seamlessly from mobile to 34-inch ultrawide */
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 min-[1800px]:grid-cols-8 min-[2200px]:grid-cols-9 min-[2600px]:grid-cols-10 min-[3000px]:grid-cols-11 min-[3400px]:grid-cols-12 gap-3.5 sm:gap-4 md:gap-5">
@@ -997,6 +1200,7 @@ export default function App() {
                   onToggleSelect={toggleSelectGame}
                   onOpenPreview={setPreviewGame}
                   onSendToTelegram={handleSendSingleGameToTelegram}
+                  steamOnlineDiscountPercent={steamOnlineSyncConfig.discountPercent ?? 0}
                 />
               ))}
             </div>
@@ -1092,9 +1296,12 @@ export default function App() {
         onClose={() => setPreviewGame(null)}
         adminHandle={settings.telegramAdminHandle}
         onSendToTelegram={handleSendSingleGameToTelegram}
+        steamOnlineDiscountPercent={steamOnlineSyncConfig.discountPercent ?? 0}
         onSaveGameSpec={(targetGame, spec) => {
+          const latestGame =
+            StorageService.getGames().find((g) => g.id === targetGame.id) || targetGame;
           const updated: Game = {
-            ...targetGame,
+            ...latestGame,
             steamSpec: spec,
           };
           handleUpdateGame(updated);
@@ -1123,6 +1330,41 @@ export default function App() {
         settings={settings}
         onSaveSettings={handleSaveSettings}
         onShowToast={showToast}
+      />
+
+      {/* Steam Online Custom Cover Editor Modal (Photo / Video / Text & Discount Style) */}
+      <SteamOnlineCoverModal
+        isOpen={isSteamOnlineCoverModalOpen}
+        onClose={() => setIsSteamOnlineCoverModalOpen(false)}
+        settings={settings}
+        onSaveSettings={handleSaveSettings}
+        onShowToast={showToast}
+      />
+
+      {/* Steam Online Sync Results Popup */}
+      <SteamOnlineSyncModal
+        state={steamSyncModal}
+        onClose={() => setSteamSyncModal((prev) => ({ ...prev, isOpen: false }))}
+        onUploadGames={(items: SteamSyncFeedItem[]) => {
+          if (items.length === 0) return;
+          const result = StorageService.uploadSteamFeedGamesToOnline(items, {
+            defaultPriceUsd: steamOnlineSyncConfig.defaultPriceUsd,
+          });
+          const uploadedIds = new Set(items.map((i) => i.appId));
+          setSteamOnlineSyncConfig(StorageService.getSteamOnlineSyncConfig());
+          setGames(result.games);
+          setSteamSyncModal((prev) => ({
+            ...prev,
+            addedCount: prev.addedCount + result.addedCount,
+            feedGames: prev.feedGames.map((g) =>
+              uploadedIds.has(g.appId) ? { ...g, status: 'added' as const } : g
+            ),
+          }));
+          showToast(
+            `🎉 បាន Upload Game ចំនួន ${items.length} ចូល Category "Steam Online" នៅលើ Front Store រួចរាល់!`,
+            'success'
+          );
+        }}
       />
     </div>
   );
