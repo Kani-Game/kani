@@ -225,6 +225,8 @@ export interface SiteSettings {
   qrCodeLabel?: string; // Label for QR code e.g. 'ABA PAY / KHQR'
   coverCards?: CoverCard[]; // Featured cover promo cards at top of storefront
   steamOnlineCoverSlides?: SteamOnlineCoverSlide[]; // Customizable Steam Online Photo/Video/Text+Discount cover slides
+  productCoverSlides?: SteamOnlineCoverSlide[]; // Customizable Product tab Photo/Video/Text cover slides
+  externalCoverSlides?: SteamOnlineCoverSlide[]; // Customizable GameថែមExternal tab Photo/Video/Text cover slides
 }
 
 export type UserRole = 'admin' | 'pos';

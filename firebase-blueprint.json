@@ -102,7 +102,10 @@
         "heroCoverVideo": { "type": "string", "description": "Custom cover video URL (MP4/WebM/YouTube or /uploads path)" },
         "khrExchangeRate": { "type": "number" },
         "posCashierName": { "type": "string" },
-        "coverCards": { "type": "array", "description": "Featured storefront cover promo cards" }
+        "coverCards": { "type": "array", "description": "Featured storefront cover promo cards" },
+        "steamOnlineCoverSlides": { "type": "array", "description": "Customizable Steam Online cover photo/video/text slides" },
+        "productCoverSlides": { "type": "array", "description": "Customizable Product category cover photo/video/text slides" },
+        "externalCoverSlides": { "type": "array", "description": "Customizable GameថែមExternal category cover photo/video/text slides" }
       }
     },
     "ReportSavings": {

@@ -18,7 +18,7 @@ import { POSTerminal } from './components/POSTerminal';
 import { ToastContainer, ToastMessage } from './components/Toast';
 import { CoverMediaModal } from './components/CoverMediaModal';
 import { SteamOnlineSyncModal, SteamSyncModalState, SteamSyncFeedItem } from './components/SteamOnlineSyncModal';
-import { SteamOnlineCover } from './components/SteamOnlineCover';
+import { SteamOnlineCover, PromoCoverTarget } from './components/SteamOnlineCover';
 import { SteamOnlineCoverModal } from './components/SteamOnlineCoverModal';
 import { computeSteamOnlinePricing } from './utils/pricingUtils';
 
@@ -109,7 +109,7 @@ export default function App() {
   const [isAdminView, setIsAdminView] = useState(false);
   const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
   const [isCoverMediaModalOpen, setIsCoverMediaModalOpen] = useState(false);
-  const [isSteamOnlineCoverModalOpen, setIsSteamOnlineCoverModalOpen] = useState(false);
+  const [promoCoverModalTarget, setPromoCoverModalTarget] = useState<PromoCoverTarget | null>(null);
   const [loginTarget, setLoginTarget] = useState<'admin' | 'pos'>('admin');
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentUserRole, setCurrentUserRole] = useState<UserRole | null>(() =>
@@ -169,6 +169,11 @@ export default function App() {
     // Real-Time Cloud Firestore Sync for Steam Online Auto-Update config
     const unsubscribeSteamOnlineSync = StorageService.subscribeToSteamOnlineSyncConfig((cfg) => {
       setSteamOnlineSyncConfig(cfg);
+    });
+
+    // Surface any permanent Firestore cloud sync errors immediately instead of silently reverting
+    const unsubscribeSyncErrors = StorageService.subscribeToSyncErrors((message) => {
+      showToast(message, 'error');
     });
 
     const initialTab = getTabFromUrl();
@@ -339,6 +344,7 @@ export default function App() {
       unsubscribeCloudExpenses();
       unsubscribeCloudUserAccounts();
       unsubscribeSteamOnlineSync();
+      unsubscribeSyncErrors();
       window.removeEventListener('hashchange', syncFromUrl);
       window.removeEventListener('popstate', syncFromUrl);
       window.removeEventListener('keydown', handleKeyDown);
@@ -936,14 +942,50 @@ export default function App() {
       ) : (
         <main className="flex-1 w-full max-w-[3600px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12 py-6">
 
-          {/* Distinct Hero Showcase: Customizable Steam Online Cover (Photo/Video/Text+Discount) vs Standard HeroBanner */}
+          {/* Distinct Hero Showcase per Category: Steam Offline (HeroBanner) vs Steam Online / Product / External */}
           {activeTab === 'steam-online' ? (
             <SteamOnlineCover
+              key="steam-online"
+              variant="steam-online"
               settings={settings}
               games={steamOnlineGames}
               globalDiscountPercent={steamOnlineSyncConfig.discountPercent ?? 0}
               canEditCover={isLoggedIn && currentUserRole !== 'pos'}
-              onEditCover={() => setIsSteamOnlineCoverModalOpen(true)}
+              onEditCover={() => setPromoCoverModalTarget('steam-online')}
+              onOpenTelegram={() => {
+                const handle = settings.telegramAdminHandle.replace('@', '');
+                window.open(`https://t.me/${handle}`, '_blank');
+              }}
+              onBrowseCatalog={() => {
+                const el = document.getElementById('catalog-section');
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
+            />
+          ) : activeTab === 'product' ? (
+            <SteamOnlineCover
+              key="product"
+              variant="product"
+              settings={settings}
+              games={productGames}
+              canEditCover={isLoggedIn && currentUserRole !== 'pos'}
+              onEditCover={() => setPromoCoverModalTarget('product')}
+              onOpenTelegram={() => {
+                const handle = settings.telegramAdminHandle.replace('@', '');
+                window.open(`https://t.me/${handle}`, '_blank');
+              }}
+              onBrowseCatalog={() => {
+                const el = document.getElementById('catalog-section');
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+              }}
+            />
+          ) : activeTab === 'free' ? (
+            <SteamOnlineCover
+              key="external"
+              variant="external"
+              settings={settings}
+              games={freeGames}
+              canEditCover={isLoggedIn && currentUserRole !== 'pos'}
+              onEditCover={() => setPromoCoverModalTarget('external')}
               onOpenTelegram={() => {
                 const handle = settings.telegramAdminHandle.replace('@', '');
                 window.open(`https://t.me/${handle}`, '_blank');
@@ -1300,8 +1342,24 @@ export default function App() {
         onSaveGameSpec={(targetGame, spec) => {
           const latestGame =
             StorageService.getGames().find((g) => g.id === targetGame.id) || targetGame;
+          const isProduct = (latestGame.tag || '').toLowerCase().includes('product');
+          const curGenreLower = (latestGame.genre || '').trim().toLowerCase();
+          const shouldUpgradeGenre =
+            !isProduct &&
+            Boolean(spec.primaryGenre) &&
+            spec.primaryGenre !== 'Steam Game' &&
+            (!curGenreLower ||
+              curGenreLower === 'general' ||
+              curGenreLower === 'steam game' ||
+              curGenreLower.includes(' / ') ||
+              ['action', 'adventure', 'indie', 'simulation', 'strategy', 'casual', 'rpg'].includes(
+                curGenreLower
+              ) ||
+              latestGame.genre === latestGame.steamSpec?.primaryGenre);
           const updated: Game = {
             ...latestGame,
+            steamAppId: latestGame.steamAppId || spec.appId,
+            genre: shouldUpgradeGenre ? spec.primaryGenre : latestGame.genre,
             steamSpec: spec,
           };
           handleUpdateGame(updated);
@@ -1332,10 +1390,11 @@ export default function App() {
         onShowToast={showToast}
       />
 
-      {/* Steam Online Custom Cover Editor Modal (Photo / Video / Text & Discount Style) */}
+      {/* Steam Online / Product / External Custom Cover Editor Modal */}
       <SteamOnlineCoverModal
-        isOpen={isSteamOnlineCoverModalOpen}
-        onClose={() => setIsSteamOnlineCoverModalOpen(false)}
+        isOpen={promoCoverModalTarget !== null}
+        target={promoCoverModalTarget || 'steam-online'}
+        onClose={() => setPromoCoverModalTarget(null)}
         settings={settings}
         onSaveSettings={handleSaveSettings}
         onShowToast={showToast}

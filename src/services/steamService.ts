@@ -11,7 +11,7 @@ import type {
 export type { SteamSpecItem, SteamRequirementBlock, SteamSpecData, SteamOnlineFeedItem, SteamOnlineSyncSource };
 export type SteamSpecResponse = SteamSpecData;
 
-const STEAM_SPEC_CACHE_KEY = 'kani_steam_spec_cache_v1';
+const STEAM_SPEC_CACHE_KEY = 'kani_steam_spec_cache_v2';
 const CLIENT_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
 interface SteamCacheStore {
@@ -464,4 +464,59 @@ export async function fetchSteamPricesBatch(
   }
   return res.prices || {};
 }
+
+export interface SteamGenreLookupItem {
+  id: string;
+  name: string;
+  link?: string;
+  steamAppId?: number;
+}
+
+export interface SteamGenreLookupResult {
+  appId: number;
+  genre: string;
+  steamUrl: string;
+  matchedName?: string;
+}
+
+export async function fetchSteamGenresBatch(
+  items: SteamGenreLookupItem[]
+): Promise<Record<string, SteamGenreLookupResult>> {
+  if (!items.length) return {};
+
+  const tryPost = async (endpoint: string) => {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: items.slice(0, 50) }),
+    });
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    const rawText = await res.text();
+    let payload: any = null;
+    if (rawText) {
+      try {
+        payload = JSON.parse(rawText);
+      } catch {
+        payload = null;
+      }
+    }
+    const looksLikeHtml =
+      contentType.includes('text/html') ||
+      rawText.trimStart().startsWith('<!doctype') ||
+      rawText.trimStart().startsWith('<html');
+
+    if (looksLikeHtml || payload === null) return { nonJson: true };
+    if (!res.ok || !payload?.genres || typeof payload.genres !== 'object') {
+      return { error: payload?.error || `HTTP ${res.status}` };
+    }
+    return { genres: payload.genres as Record<string, SteamGenreLookupResult> };
+  };
+
+  let res = await tryPost('/api/steam-genres');
+  if (res.nonJson) {
+    res = await tryPost('/.netlify/functions/steam-genres');
+  }
+  return res.genres || {};
+}
+
 

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Game, SteamSpecData } from '../types/game';
-import { compressImageFile } from '../utils/imageUtils';
+import { compressImageFile, compressDataUrl, blobToCompressedDataUrl } from '../utils/imageUtils';
 import { extractSteamAppId, fetchSteamSpec } from '../services/steamService';
 
 interface POSUploadProductModalProps {
@@ -239,9 +239,27 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
     setBarcode(randomSku);
   };
 
-  const handleApplyUrl = (rawUrl: string) => {
+  const handleApplyUrl = async (rawUrl: string) => {
     const clean = rawUrl.trim();
     if (!clean) return;
+    if (clean.startsWith('data:image/')) {
+      try {
+        const compressed = await compressDataUrl(clean, 640, 850, 0.82, 480_000);
+        setUrlInputVal('');
+        setImg(compressed);
+        setImgError(false);
+        setValidationError(null);
+        setPasteFeedback({ type: 'success', text: '✅ បាន Compress និង Paste រូបភាពជោគជ័យ!' });
+        setTimeout(() => setPasteFeedback(null), 3500);
+      } catch (err) {
+        setValidationError(
+          err instanceof Error
+            ? err.message
+            : 'រូបភាពធំពេកសម្រាប់ Cloud Sync — សូមជ្រើសរើសរូបភាពតូចជាងនេះ ឬប្រើ Image URL'
+        );
+      }
+      return;
+    }
     setUrlInputVal(clean);
     setImg(clean);
     setImgError(false);
@@ -262,21 +280,26 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
             const imgType = item.types.find((t) => t.startsWith('image/'));
             if (imgType) {
               const blob = await item.getType(imgType);
-              const reader = new FileReader();
-              reader.onload = (ev) => {
-                const res = ev.target?.result as string;
-                if (res) {
-                  setImg(res);
-                  setUrlInputVal('');
-                  setImgError(false);
-                  setPasteFeedback({
-                    type: 'success',
-                    text: '✅ បាន Paste រូបភាព (Image File) ពី Clipboard ជោគជ័យ!',
-                  });
-                  setTimeout(() => setPasteFeedback(null), 3500);
-                }
-              };
-              reader.readAsDataURL(blob);
+              setIsUploadingFile(true);
+              try {
+                const compressed = await blobToCompressedDataUrl(blob, 640, 850, 0.82, 480_000);
+                setImg(compressed);
+                setUrlInputVal('');
+                setImgError(false);
+                setPasteFeedback({
+                  type: 'success',
+                  text: '✅ បាន Compress & Paste រូបភាពពី Clipboard ជោគជ័យ!',
+                });
+                setTimeout(() => setPasteFeedback(null), 3500);
+              } catch (err) {
+                setValidationError(
+                  err instanceof Error
+                    ? err.message
+                    : 'មិនអាច Compress រូបភាពពី Clipboard បានទេ — សូមប្រើ Upload Image ឬ Image URL'
+                );
+              } finally {
+                setIsUploadingFile(false);
+              }
               return;
             }
           }
@@ -290,7 +313,7 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
         const text = await navigator.clipboard.readText();
         const clean = text.trim();
         if (clean) {
-          handleApplyUrl(clean);
+          await handleApplyUrl(clean);
           return;
         }
       }
@@ -307,8 +330,8 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
     });
   };
 
-  const handleModalPaste = (e: React.ClipboardEvent) => {
-    // If an image file was copied to clipboard, load it immediately
+  const handleModalPaste = async (e: React.ClipboardEvent) => {
+    // If an image file was copied to clipboard, compress and load it immediately
     const items = e.clipboardData?.items;
     if (items) {
       for (let i = 0; i < items.length; i++) {
@@ -316,21 +339,27 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
           const file = items[i].getAsFile();
           if (file) {
             e.preventDefault();
-            const reader = new FileReader();
-            reader.onload = (ev) => {
-              const res = ev.target?.result as string;
-              if (res) {
-                setImg(res);
-                setUrlInputVal('');
-                setImgError(false);
-                setPasteFeedback({
-                  type: 'success',
-                  text: '✅ បាន Paste រូបភាពពី Clipboard ជោគជ័យ!',
-                });
-                setTimeout(() => setPasteFeedback(null), 3500);
-              }
-            };
-            reader.readAsDataURL(file);
+            setIsUploadingFile(true);
+            setValidationError(null);
+            try {
+              const compressed = await compressImageFile(file, 640, 850, 0.82, 480_000);
+              setImg(compressed);
+              setUrlInputVal('');
+              setImgError(false);
+              setPasteFeedback({
+                type: 'success',
+                text: '✅ បាន Compress & Paste រូបភាពពី Clipboard ជោគជ័យ!',
+              });
+              setTimeout(() => setPasteFeedback(null), 3500);
+            } catch (err) {
+              setValidationError(
+                err instanceof Error
+                  ? err.message
+                  : 'មិនអាច Compress រូបភាពពី Clipboard បានទេ — សូមជ្រើសរើសរូបភាព JPG/PNG តូចជាងនេះ'
+              );
+            } finally {
+              setIsUploadingFile(false);
+            }
             return;
           }
         }
@@ -348,13 +377,14 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
           pastedText.startsWith('data:image/'))
       ) {
         e.preventDefault();
-        handleApplyUrl(pastedText);
+        await handleApplyUrl(pastedText);
       }
     }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = '';
     if (file) {
       if (file.size > 15 * 1024 * 1024) {
         setValidationError('File size ធំពេក (អតិបរមា 15MB)');
@@ -363,30 +393,46 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
       setIsUploadingFile(true);
       setValidationError(null);
       try {
-        const compressedBase64 = await compressImageFile(file, 640, 850, 0.82);
+        const compressedBase64 = await compressImageFile(file, 640, 850, 0.82, 480_000);
         setImg(compressedBase64);
         setUrlInputVal('');
         setImgError(false);
       } catch (err) {
         console.error('Image compression failed', err);
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          setImg(event.target?.result as string);
-          setUrlInputVal('');
-          setImgError(false);
-        };
-        reader.readAsDataURL(file);
+        setValidationError(
+          err instanceof Error
+            ? err.message
+            : 'មិនអាច Compress រូបភាពនេះសម្រាប់ Cloud Sync បានទេ — សូមជ្រើសរើសរូបភាព JPG/PNG/WebP ផ្សេង ឬប្រើ Image URL'
+        );
       } finally {
         setIsUploadingFile(false);
       }
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
       setValidationError('សូមបញ្ចូលឈ្មោះ Game ឬ Product!');
       return;
+    }
+
+    let safeImg = img.trim() || 'https://placehold.co/600x800/131b2e/ffffff?text=Game';
+    if (safeImg.startsWith('data:image/') && safeImg.length > 480_000) {
+      setIsUploadingFile(true);
+      try {
+        safeImg = await compressDataUrl(safeImg, 640, 850, 0.78, 480_000);
+      } catch (err) {
+        setIsUploadingFile(false);
+        setValidationError(
+          err instanceof Error
+            ? err.message
+            : 'រូបភាពធំពេកសម្រាប់ Cloud Sync — សូម Upload រូបភាពតូចជាងនេះ ឬប្រើ Image URL'
+        );
+        return;
+      } finally {
+        setIsUploadingFile(false);
+      }
     }
 
     const finalTag = tag === 'CUSTOM' ? (customTag.trim() || 'General') : tag;
@@ -398,7 +444,7 @@ export const POSUploadProductModal: React.FC<POSUploadProductModalProps> = ({
       genre: genre.trim() || 'General',
       price: numPrice,
       costPrice: parseFloat(costPrice) || 0,
-      img: img.trim() || 'https://placehold.co/600x800/131b2e/ffffff?text=Game',
+      img: safeImg,
       barcode: barcode.trim() || undefined,
       stock: isDigital ? undefined : parseInt(stock, 10) || 0,
       description: description.trim() || undefined,

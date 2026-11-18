@@ -108,9 +108,15 @@ export const MissingSteamSpecsModal: React.FC<MissingSteamSpecsModalProps> = ({
           : { name: target.name, link: rawLink || undefined }
       );
       const latestTarget = StorageService.getGames().find((g) => g.id === target.id) || target;
+      const resolvedGenre =
+        spec.primaryGenre && spec.primaryGenre !== 'Steam Game'
+          ? spec.primaryGenre
+          : spec.genres?.[0] || latestTarget.genre;
       onUpdateGame({
         ...latestTarget,
         link: latestTarget.link || spec.steamUrl,
+        steamAppId: latestTarget.steamAppId || spec.appId,
+        genre: resolvedGenre || latestTarget.genre,
         skipSteamLink: false,
         steamSpec: spec,
       });
@@ -118,7 +124,7 @@ export const MissingSteamSpecsModal: React.FC<MissingSteamSpecsModalProps> = ({
         ...prev,
         [target.id]: {
           status: 'synced',
-          message: `Synced "${spec.matchedName}" (App ID: ${spec.appId})`,
+          message: `Synced "${spec.matchedName}" • ${resolvedGenre || 'Steam Game'} (App ID: ${spec.appId})`,
         },
       }));
       return true;

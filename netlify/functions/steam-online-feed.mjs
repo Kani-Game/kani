@@ -5,33 +5,189 @@ const STEAM_FETCH_HEADERS = {
   'Accept-Language': 'en-US,en;q=0.9',
 };
 
-const GENERIC_FEATURE_TAGS = new Set([
-  'singleplayer',
-  'multiplayer',
-  'online co-op',
-  'co-op',
-  'pvp',
+const NON_GENRE_OFFICIAL = new Set([
   'free to play',
   'early access',
-  '3d',
-  'first-person',
-  'third person',
-  'controller',
-  'great soundtrack',
-  'atmospheric',
-  'story rich',
-  'difficult',
-  'replay value',
-  'character customization',
-  'female protagonist',
-  'pixel graphics',
-  'colorful',
-  'funny',
-  'gore',
-  'violent',
-  'nudity',
-  'sexual content',
+  'utilities',
+  'software',
+  'design & illustration',
+  'web publishing',
+  'animation & modeling',
+  'video production',
+  'audio production',
+  'photo editing',
+  'game development',
+  'education',
+  'accounting',
 ]);
+
+function resolveAccurateSteamGenre(officialGenres, tagNames) {
+  const cleanOfficial = officialGenres
+    .map((g) => g.trim())
+    .filter((g) => g.length > 0 && !NON_GENRE_OFFICIAL.has(g.toLowerCase()));
+  const cleanTags = tagNames.map((t) => t.trim()).filter(Boolean);
+
+  const officialLower = new Set(cleanOfficial.map((g) => g.toLowerCase()));
+  const top4 = new Set(cleanTags.slice(0, 4).map((t) => t.toLowerCase()));
+  const top5 = new Set(cleanTags.slice(0, 5).map((t) => t.toLowerCase()));
+  const top6 = new Set(cleanTags.slice(0, 6).map((t) => t.toLowerCase()));
+  const top8 = new Set(cleanTags.slice(0, 8).map((t) => t.toLowerCase()));
+  const top12 = new Set(cleanTags.slice(0, 12).map((t) => t.toLowerCase()));
+
+  if (top6.has('battle royale')) return 'Battle Royale';
+  if (top6.has('metroidvania')) return 'Metroidvania';
+  if (
+    top6.has('mmorpg') ||
+    ((officialLower.has('massively multiplayer') || top5.has('massively multiplayer')) &&
+      (officialLower.has('rpg') || top8.has('rpg')))
+  ) {
+    return 'MMORPG';
+  }
+  if (top6.has('souls-like') || top6.has('soulslike')) return 'Soulslike';
+  if (
+    top6.has('tactical') &&
+    (top8.has('fps') ||
+      top8.has('first-person shooter') ||
+      top8.has('third-person shooter') ||
+      top8.has('shooter'))
+  ) {
+    return 'Tactical Shooter';
+  }
+  if (top8.has('survival horror') || (top8.has('survival') && top8.has('horror'))) {
+    return 'Survival Horror';
+  }
+  if (top5.has('horror') || top5.has('psychological horror')) return 'Horror';
+  if (
+    top6.has('fps') ||
+    top6.has('first-person shooter') ||
+    top6.has('hero shooter') ||
+    top6.has('looter shooter') ||
+    top6.has('boomer shooter') ||
+    top6.has('extraction shooter')
+  ) {
+    return 'FPS Shooter';
+  }
+  if (top6.has('third-person shooter') || top5.has('shooter') || top5.has("shoot 'em up")) {
+    return 'Shooter';
+  }
+  if (top6.has('farming sim') || top6.has('agriculture')) return 'Farming Sim';
+  if (top6.has('city builder') || top6.has('colony sim')) return 'City Builder';
+  if (
+    (officialLower.has('racing') || top5.has('racing')) &&
+    (officialLower.has('simulation') ||
+      top8.has('simulation') ||
+      top8.has('automobile sim') ||
+      top8.has('driving'))
+  ) {
+    return 'Racing Sim';
+  }
+  if (officialLower.has('racing') || top5.has('racing')) return 'Racing';
+  if (
+    top6.has('automobile sim') ||
+    top6.has('flight') ||
+    top6.has('space sim') ||
+    top6.has('trains') ||
+    (top5.has('driving') && (officialLower.has('simulation') || top8.has('simulation')))
+  ) {
+    return 'Vehicle Sim';
+  }
+  if (
+    officialLower.has('sports') ||
+    top5.has('sports') ||
+    top5.has('football (soccer)') ||
+    top5.has('basketball')
+  ) {
+    return 'Sports';
+  }
+  if (top6.has('fighting') || top6.has('2d fighter') || top6.has('3d fighter')) {
+    return 'Fighting';
+  }
+  if (
+    top6.has('action rpg') ||
+    top6.has('arpg') ||
+    ((officialLower.has('action') || top8.has('action')) &&
+      (officialLower.has('rpg') || top8.has('rpg')))
+  ) {
+    return 'Action RPG';
+  }
+  if (top6.has('jrpg')) return 'JRPG';
+  if (top6.has('tactical rpg') || top6.has('crpg') || top6.has('turn-based rpg')) {
+    return 'Tactical RPG';
+  }
+  if (officialLower.has('rpg') || top5.has('rpg')) return 'RPG';
+  if (top6.has('open world survival craft') || (top5.has('open world') && top6.has('survival'))) {
+    return 'Open World Survival';
+  }
+  if (top5.has('survival')) return 'Survival';
+  if (
+    top6.has('roguelike') ||
+    top6.has('roguelite') ||
+    top6.has('action roguelike') ||
+    top6.has('roguelike deckbuilder')
+  ) {
+    return 'Roguelike';
+  }
+  if (top6.has('rts') || top6.has('real time strategy') || top6.has('real-time tactics')) {
+    return top12.has('tactical') || top12.has('wargame') ? 'Tactical RTS' : 'RTS Strategy';
+  }
+  if (top6.has('grand strategy') || top6.has('4x') || top6.has('turn-based strategy')) {
+    return 'Strategy';
+  }
+  if (top6.has('tower defense')) return 'Tower Defense';
+  if (top6.has('hack and slash') || top6.has('spectacle fighter') || top6.has("beat 'em up")) {
+    return 'Hack & Slash';
+  }
+  if (top5.has('stealth')) return 'Stealth Action';
+  if (top5.has('visual novel')) return 'Visual Novel';
+  if (
+    top5.has('platformer') ||
+    top5.has('2d platformer') ||
+    top5.has('3d platformer') ||
+    top5.has('precision platformer')
+  ) {
+    return 'Platformer';
+  }
+  if (top5.has('puzzle') || top5.has('puzzle-platformer') || top5.has('detective')) {
+    return 'Puzzle';
+  }
+  if (
+    top4.has('open world') &&
+    (officialLower.has('action') || officialLower.has('adventure') || top6.has('action'))
+  ) {
+    return 'Open World';
+  }
+  if (
+    (officialLower.has('action') && officialLower.has('adventure')) ||
+    (top5.has('action') && top5.has('adventure')) ||
+    top5.has('action-adventure')
+  ) {
+    return 'Action Adventure';
+  }
+  if (officialLower.has('strategy') && officialLower.has('simulation')) {
+    return 'Strategy Sim';
+  }
+  if (top6.has('life sim') || top6.has('dating sim') || top6.has('management')) {
+    return 'Simulation';
+  }
+
+  for (const g of ['Simulation', 'Strategy', 'Adventure', 'Action', 'Casual']) {
+    if (officialLower.has(g.toLowerCase()) || top5.has(g.toLowerCase())) {
+      return g;
+    }
+  }
+  if (officialLower.has('massively multiplayer')) return 'MMORPG';
+  if (officialLower.has('indie')) return 'Indie';
+  if (cleanOfficial.length > 0) return cleanOfficial[0];
+
+  const nonIndieTag = cleanTags.find((t) =>
+    ['action', 'adventure', 'simulation', 'strategy', 'rpg', 'casual', 'sports', 'racing', 'indie'].includes(
+      t.toLowerCase()
+    )
+  );
+  if (nonIndieTag) return nonIndieTag;
+
+  return 'Steam Game';
+}
 
 async function fetchJson(url, timeoutMs = 8500) {
   const controller = new AbortController();
@@ -131,23 +287,7 @@ async function checkUrlReturns200(url) {
 
 function resolveGenreFromSteamTags(tagIds, tagMap) {
   const names = tagIds.map((id) => tagMap.get(id)).filter(Boolean);
-  const specific = names.filter((n) => !GENERIC_FEATURE_TAGS.has(n.toLowerCase()));
-  const lowerSet = new Set(specific.map((n) => n.toLowerCase()));
-
-  if (lowerSet.has('action') && lowerSet.has('rpg')) return 'Action RPG';
-  if (lowerSet.has('action') && lowerSet.has('adventure')) return 'Action Adventure';
-  if (lowerSet.has('battle royale')) return 'Battle Royale';
-  if (lowerSet.has('mmorpg') || lowerSet.has('massively multiplayer')) return 'MMORPG';
-  if (lowerSet.has('tactical') && (lowerSet.has('fps') || lowerSet.has('shooter'))) {
-    return 'Tactical Shooter';
-  }
-  if (lowerSet.has('fps')) return 'FPS Shooter';
-  if (lowerSet.has('racing') && lowerSet.has('simulation')) return 'Racing Sim';
-  if (lowerSet.has('survival')) return 'Survival';
-  if (specific.length >= 2) return `${specific[0]} / ${specific[1]}`;
-  if (specific.length === 1) return specific[0];
-  if (names.length >= 1) return names[0];
-  return 'Steam Game';
+  return resolveAccurateSteamGenre([], names);
 }
 
 export async function handler(event) {
@@ -286,7 +426,7 @@ export async function handler(event) {
             include_assets: true,
             include_basic_info: true,
             include_release: true,
-            include_tag_count: 10,
+            include_tag_count: 15,
             include_all_purchase_options: false,
           },
         });

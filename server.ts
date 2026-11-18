@@ -4,6 +4,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { GoogleGenAI, ThinkingLevel, Type } from '@google/genai';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -338,20 +339,251 @@ async function checkUrlReturns200(url: string): Promise<boolean> {
   }
 }
 
-async function resolveVerifiedCoverImage(appId: number, appData: any): Promise<string> {
+const STEAM_TAG_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+let steamPopularTagsCache: { map: Map<number, string>; expiresAt: number } | null = null;
+
+async function getSteamTagNameMap(): Promise<Map<number, string>> {
+  const now = Date.now();
+  if (steamPopularTagsCache && steamPopularTagsCache.expiresAt > now) {
+    return steamPopularTagsCache.map;
+  }
+  try {
+    const tagsList = await fetchJsonWithTimeout(
+      'https://store.steampowered.com/tagdata/populartags/english',
+      7000
+    );
+    const map = new Map<number, string>();
+    if (Array.isArray(tagsList)) {
+      for (const t of tagsList) {
+        if (t && typeof t.tagid === 'number' && typeof t.name === 'string') {
+          map.set(t.tagid, t.name.trim());
+        }
+      }
+    }
+    steamPopularTagsCache = { map, expiresAt: now + STEAM_TAG_CACHE_TTL_MS };
+    return map;
+  } catch {
+    return steamPopularTagsCache?.map || new Map<number, string>();
+  }
+}
+
+const NON_GENRE_OFFICIAL = new Set([
+  'free to play',
+  'early access',
+  'utilities',
+  'software',
+  'design & illustration',
+  'web publishing',
+  'animation & modeling',
+  'video production',
+  'audio production',
+  'photo editing',
+  'game development',
+  'education',
+  'accounting',
+]);
+
+function resolveAccurateSteamGenre(officialGenres: string[], tagNames: string[]): string {
+  const cleanOfficial = officialGenres
+    .map((g) => g.trim())
+    .filter((g) => g.length > 0 && !NON_GENRE_OFFICIAL.has(g.toLowerCase()));
+  const cleanTags = tagNames.map((t) => t.trim()).filter(Boolean);
+
+  const officialLower = new Set(cleanOfficial.map((g) => g.toLowerCase()));
+  const top4 = new Set(cleanTags.slice(0, 4).map((t) => t.toLowerCase()));
+  const top5 = new Set(cleanTags.slice(0, 5).map((t) => t.toLowerCase()));
+  const top6 = new Set(cleanTags.slice(0, 6).map((t) => t.toLowerCase()));
+  const top8 = new Set(cleanTags.slice(0, 8).map((t) => t.toLowerCase()));
+  const top12 = new Set(cleanTags.slice(0, 12).map((t) => t.toLowerCase()));
+
+  // High-specificity community/Steam genre rules (checked in priority order)
+  if (top6.has('battle royale')) return 'Battle Royale';
+  if (top6.has('metroidvania')) return 'Metroidvania';
+  if (
+    top6.has('mmorpg') ||
+    ((officialLower.has('massively multiplayer') || top5.has('massively multiplayer')) &&
+      (officialLower.has('rpg') || top8.has('rpg')))
+  ) {
+    return 'MMORPG';
+  }
+  if (top6.has('souls-like') || top6.has('soulslike')) return 'Soulslike';
+  if (
+    top6.has('tactical') &&
+    (top8.has('fps') ||
+      top8.has('first-person shooter') ||
+      top8.has('third-person shooter') ||
+      top8.has('shooter'))
+  ) {
+    return 'Tactical Shooter';
+  }
+  if (
+    top8.has('survival horror') ||
+    (top8.has('survival') && top8.has('horror'))
+  ) {
+    return 'Survival Horror';
+  }
+  if (top5.has('horror') || top5.has('psychological horror')) return 'Horror';
+  if (
+    top6.has('fps') ||
+    top6.has('first-person shooter') ||
+    top6.has('hero shooter') ||
+    top6.has('looter shooter') ||
+    top6.has('boomer shooter') ||
+    top6.has('extraction shooter')
+  ) {
+    return 'FPS Shooter';
+  }
+  if (top6.has('third-person shooter') || top5.has('shooter') || top5.has('shoot \'em up')) {
+    return 'Shooter';
+  }
+  if (top6.has('farming sim') || top6.has('agriculture')) return 'Farming Sim';
+  if (top6.has('city builder') || top6.has('colony sim')) return 'City Builder';
+  if (
+    (officialLower.has('racing') || top5.has('racing')) &&
+    (officialLower.has('simulation') ||
+      top8.has('simulation') ||
+      top8.has('automobile sim') ||
+      top8.has('driving'))
+  ) {
+    return 'Racing Sim';
+  }
+  if (officialLower.has('racing') || top5.has('racing')) return 'Racing';
+  if (
+    top6.has('automobile sim') ||
+    top6.has('flight') ||
+    top6.has('space sim') ||
+    top6.has('trains') ||
+    (top5.has('driving') && (officialLower.has('simulation') || top8.has('simulation')))
+  ) {
+    return 'Vehicle Sim';
+  }
+  if (
+    officialLower.has('sports') ||
+    top5.has('sports') ||
+    top5.has('football (soccer)') ||
+    top5.has('basketball')
+  ) {
+    return 'Sports';
+  }
+  if (top6.has('fighting') || top6.has('2d fighter') || top6.has('3d fighter')) {
+    return 'Fighting';
+  }
+  if (
+    top6.has('action rpg') ||
+    top6.has('arpg') ||
+    ((officialLower.has('action') || top8.has('action')) &&
+      (officialLower.has('rpg') || top8.has('rpg')))
+  ) {
+    return 'Action RPG';
+  }
+  if (top6.has('jrpg')) return 'JRPG';
+  if (top6.has('tactical rpg') || top6.has('crpg') || top6.has('turn-based rpg')) {
+    return 'Tactical RPG';
+  }
+  if (officialLower.has('rpg') || top5.has('rpg')) return 'RPG';
+  if (
+    top6.has('open world survival craft') ||
+    (top5.has('open world') && top6.has('survival'))
+  ) {
+    return 'Open World Survival';
+  }
+  if (top5.has('survival')) return 'Survival';
+  if (
+    top6.has('roguelike') ||
+    top6.has('roguelite') ||
+    top6.has('action roguelike') ||
+    top6.has('roguelike deckbuilder')
+  ) {
+    return 'Roguelike';
+  }
+  if (top6.has('rts') || top6.has('real time strategy') || top6.has('real-time tactics')) {
+    return top12.has('tactical') || top12.has('wargame') ? 'Tactical RTS' : 'RTS Strategy';
+  }
+  if (
+    top6.has('grand strategy') ||
+    top6.has('4x') ||
+    top6.has('turn-based strategy')
+  ) {
+    return 'Strategy';
+  }
+  if (top6.has('tower defense')) return 'Tower Defense';
+  if (top6.has('hack and slash') || top6.has('spectacle fighter') || top6.has("beat 'em up")) {
+    return 'Hack & Slash';
+  }
+  if (top5.has('stealth')) return 'Stealth Action';
+  if (top5.has('visual novel')) return 'Visual Novel';
+  if (
+    top5.has('platformer') ||
+    top5.has('2d platformer') ||
+    top5.has('3d platformer') ||
+    top5.has('precision platformer')
+  ) {
+    return 'Platformer';
+  }
+  if (top5.has('puzzle') || top5.has('puzzle-platformer') || top5.has('detective')) {
+    return 'Puzzle';
+  }
+  if (
+    top4.has('open world') &&
+    (officialLower.has('action') || officialLower.has('adventure') || top6.has('action'))
+  ) {
+    return 'Open World';
+  }
+  if (
+    (officialLower.has('action') && officialLower.has('adventure')) ||
+    (top5.has('action') && top5.has('adventure')) ||
+    top5.has('action-adventure')
+  ) {
+    return 'Action Adventure';
+  }
+  if (officialLower.has('strategy') && officialLower.has('simulation')) {
+    return 'Strategy Sim';
+  }
+  if (top6.has('life sim') || top6.has('dating sim') || top6.has('management')) {
+    return 'Simulation';
+  }
+
+  // Official Steam genre priority (prefer primary genre over generic Indie/Casual)
+  for (const g of ['Simulation', 'Strategy', 'Adventure', 'Action', 'Casual']) {
+    if (officialLower.has(g.toLowerCase()) || top5.has(g.toLowerCase())) {
+      return g;
+    }
+  }
+  if (officialLower.has('massively multiplayer')) return 'MMORPG';
+  if (officialLower.has('indie')) return 'Indie';
+  if (cleanOfficial.length > 0) return cleanOfficial[0];
+
+  const nonIndieTag = cleanTags.find((t) =>
+    ['action', 'adventure', 'simulation', 'strategy', 'rpg', 'casual', 'sports', 'racing', 'indie'].includes(
+      t.toLowerCase()
+    )
+  );
+  if (nonIndieTag) return nonIndieTag;
+
+  return 'Steam Game';
+}
+
+async function resolveBrowseAssetsAndTags(
+  appId: number,
+  appData: any
+): Promise<{ coverImage: string; tagIds: number[] }> {
   const candidates: string[] = [];
+  let tagIds: number[] = [];
 
   try {
     const inputJson = JSON.stringify({
       ids: [{ appid: appId }],
       context: { language: 'english', country_code: 'US' },
-      data_request: { include_assets: true },
+      data_request: { include_assets: true, include_tag_count: 15 },
     });
     const browseUrl = `https://api.steampowered.com/IStoreBrowseService/GetItems/v1?input_json=${encodeURIComponent(
       inputJson
     )}`;
     const browseData = await fetchJsonWithTimeout(browseUrl, 6000);
     const storeItem = browseData?.response?.store_items?.[0];
+    if (Array.isArray(storeItem?.tagids)) {
+      tagIds = storeItem.tagids.filter((id: unknown) => typeof id === 'number');
+    }
     const assets = storeItem?.assets;
 
     if (assets) {
@@ -384,13 +616,17 @@ async function resolveVerifiedCoverImage(appId: number, appData: any): Promise<s
     candidates.push(appData.capsule_imagev5);
   }
 
+  let coverImage = typeof appData?.header_image === 'string' ? appData.header_image : '';
   const uniqueCandidates = Array.from(new Set(candidates.filter(Boolean)));
   for (const url of uniqueCandidates) {
     const ok = await checkUrlReturns200(url);
-    if (ok) return url;
+    if (ok) {
+      coverImage = url;
+      break;
+    }
   }
 
-  return typeof appData?.header_image === 'string' ? appData.header_image : '';
+  return { coverImage, tagIds };
 }
 
 async function fetchSteamSpecFromUpstream(
@@ -441,9 +677,12 @@ async function fetchSteamSpecFromUpstream(
     }
   }
 
-  // 5. Fetch Steam appdetails (l=english)
+  // 5. Fetch Steam appdetails (l=english) & tag map in parallel
   const detailsUrl = `https://store.steampowered.com/api/appdetails?appids=${resolvedAppId}&l=english&cc=US`;
-  const detailsJson = await fetchJsonWithTimeout(detailsUrl, 9000);
+  const [detailsJson, tagMap] = await Promise.all([
+    fetchJsonWithTimeout(detailsUrl, 9000),
+    getSteamTagNameMap(),
+  ]);
   const entry = detailsJson?.[String(resolvedAppId)];
 
   if (!entry?.success || !entry?.data) {
@@ -454,28 +693,22 @@ async function fetchSteamSpecFromUpstream(
   const minimum = parseRequirementsHtml(appData.pc_requirements?.minimum);
   const recommended = parseRequirementsHtml(appData.pc_requirements?.recommended);
 
-  // 6. Resolve verified cover image via IStoreBrowseService/GetItems/v1 + HEAD verification
-  const coverImage = await resolveVerifiedCoverImage(resolvedAppId, appData);
+  // 6. Resolve verified cover image + Steam community tags via IStoreBrowseService/GetItems/v1
+  const { coverImage, tagIds } = await resolveBrowseAssetsAndTags(resolvedAppId, appData);
 
-  const genres: string[] = Array.isArray(appData.genres)
+  const officialGenres: string[] = Array.isArray(appData.genres)
     ? appData.genres
         .map((g: { description?: string }) => g?.description?.trim())
         .filter((g: string | undefined): g is string => Boolean(g))
     : [];
+  const tagNames = tagIds
+    .map((id) => tagMap.get(id))
+    .filter((n): n is string => Boolean(n));
 
-  const lowerGenres = genres.map((g) => g.toLowerCase());
-  let primaryGenre = genres[0] || '';
-  if (lowerGenres.includes('action') && lowerGenres.includes('rpg')) {
-    primaryGenre = 'Action RPG';
-  } else if (lowerGenres.includes('action') && lowerGenres.includes('adventure')) {
-    primaryGenre = 'Action Adventure';
-  } else if (lowerGenres.includes('racing') && lowerGenres.includes('simulation')) {
-    primaryGenre = 'Racing Sim';
-  } else if (lowerGenres.includes('strategy') && lowerGenres.includes('simulation')) {
-    primaryGenre = 'Strategy Sim';
-  } else if (genres.length >= 2) {
-    primaryGenre = `${genres[0]} / ${genres[1]}`;
-  }
+  const primaryGenre = resolveAccurateSteamGenre(officialGenres, tagNames);
+  const genres = Array.from(
+    new Set([primaryGenre, ...officialGenres].filter((g) => g && g.trim().length > 0))
+  );
 
   const payload: SteamSpecPayload = {
     appId: resolvedAppId,
@@ -607,37 +840,7 @@ async function startServer() {
 
   // Steam New Releases Auto-Update Feed Endpoint (directly from https://store.steampowered.com/)
   const STEAM_ONLINE_FEED_CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
-  const STEAM_TAG_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
-  let steamPopularTagsCache: { map: Map<number, string>; expiresAt: number } | null = null;
   const steamOnlineFeedCache = new Map<string, { payload: any; expiresAt: number }>();
-
-  const GENERIC_FEATURE_TAGS = new Set([
-    'singleplayer',
-    'multiplayer',
-    'online co-op',
-    'co-op',
-    'pvp',
-    'free to play',
-    'early access',
-    '3d',
-    'first-person',
-    'third person',
-    'controller',
-    'great soundtrack',
-    'atmospheric',
-    'story rich',
-    'difficult',
-    'replay value',
-    'character customization',
-    'female protagonist',
-    'pixel graphics',
-    'colorful',
-    'funny',
-    'gore',
-    'violent',
-    'nudity',
-    'sexual content',
-  ]);
 
   async function fetchTextWithTimeout(url: string, timeoutMs = 9000): Promise<string> {
     const controller = new AbortController();
@@ -683,52 +886,11 @@ async function startServer() {
     return ids;
   }
 
-  async function getSteamTagNameMap(): Promise<Map<number, string>> {
-    const now = Date.now();
-    if (steamPopularTagsCache && steamPopularTagsCache.expiresAt > now) {
-      return steamPopularTagsCache.map;
-    }
-    try {
-      const tagsList = await fetchJsonWithTimeout(
-        'https://store.steampowered.com/tagdata/populartags/english',
-        7000
-      );
-      const map = new Map<number, string>();
-      if (Array.isArray(tagsList)) {
-        for (const t of tagsList) {
-          if (t && typeof t.tagid === 'number' && typeof t.name === 'string') {
-            map.set(t.tagid, t.name.trim());
-          }
-        }
-      }
-      steamPopularTagsCache = { map, expiresAt: now + STEAM_TAG_CACHE_TTL_MS };
-      return map;
-    } catch {
-      return steamPopularTagsCache?.map || new Map<number, string>();
-    }
-  }
-
   function resolveGenreFromSteamTags(tagIds: number[], tagMap: Map<number, string>): string {
     const names = tagIds
       .map((id) => tagMap.get(id))
       .filter((n): n is string => Boolean(n));
-    const specific = names.filter((n) => !GENERIC_FEATURE_TAGS.has(n.toLowerCase()));
-    const lowerSet = new Set(specific.map((n) => n.toLowerCase()));
-
-    if (lowerSet.has('action') && lowerSet.has('rpg')) return 'Action RPG';
-    if (lowerSet.has('action') && lowerSet.has('adventure')) return 'Action Adventure';
-    if (lowerSet.has('battle royale')) return 'Battle Royale';
-    if (lowerSet.has('mmorpg') || lowerSet.has('massively multiplayer')) return 'MMORPG';
-    if (lowerSet.has('tactical') && (lowerSet.has('fps') || lowerSet.has('shooter'))) {
-      return 'Tactical Shooter';
-    }
-    if (lowerSet.has('fps')) return 'FPS Shooter';
-    if (lowerSet.has('racing') && lowerSet.has('simulation')) return 'Racing Sim';
-    if (lowerSet.has('survival')) return 'Survival';
-    if (specific.length >= 2) return `${specific[0]} / ${specific[1]}`;
-    if (specific.length === 1) return specific[0];
-    if (names.length >= 1) return names[0];
-    return 'Steam Game';
+    return resolveAccurateSteamGenre([], names);
   }
 
   async function fetchSteamOnlineFeedFromUpstream(
@@ -1164,6 +1326,440 @@ async function startServer() {
     }
 
     res.json({ prices });
+  });
+
+  // Batch Steam Accurate Genre Resolver (for syncing both old and new games)
+  const steamGenreCache = new Map<
+    number,
+    { appId: number; genre: string; matchedName?: string; expiresAt: number }
+  >();
+
+  app.post('/api/steam-genres', async (req: Request, res: Response) => {
+    const rawItems = Array.isArray(req.body?.items) ? req.body.items : [];
+    const items = rawItems.slice(0, 50) as Array<{
+      id?: string;
+      name?: string;
+      link?: string;
+      steamAppId?: number;
+    }>;
+
+    if (items.length === 0) {
+      res.json({ genres: {} });
+      return;
+    }
+
+    const now = Date.now();
+    const resolvedList: Array<{ key: string; appId: number }> = [];
+
+    // Resolve App IDs with bounded concurrency to avoid Steam throttling
+    for (let i = 0; i < items.length; i += 6) {
+      const slice = items.slice(i, i + 6);
+      const batchResolved = await Promise.all(
+        slice.map(async (item) => {
+          const key = String(item.id || item.name || '').trim();
+          if (!key) return null;
+
+          let appId: number | null =
+            (typeof item.steamAppId === 'number' &&
+            Number.isFinite(item.steamAppId) &&
+            item.steamAppId > 0
+              ? item.steamAppId
+              : null) ||
+            extractSteamAppId(item.link) ||
+            extractSteamAppId(item.name);
+
+          if (!appId && item.name) {
+            const aliasKey = `::${normalizeSearchTitle(item.name).toLowerCase()}`;
+            const cachedAlias = lookupAliasCache.get(aliasKey);
+            if (cachedAlias && cachedAlias.expiresAt > now) {
+              appId = cachedAlias.appId;
+            } else {
+              appId = await resolveAppIdBySearch(item.name).catch(() => null);
+              if (appId && aliasKey !== '::') {
+                lookupAliasCache.set(aliasKey, { appId, expiresAt: now + STEAM_CACHE_TTL_MS });
+              }
+            }
+          }
+
+          if (!appId) return null;
+          return { key, appId };
+        })
+      );
+      for (const entry of batchResolved) {
+        if (entry) resolvedList.push(entry);
+      }
+    }
+
+    const genres: Record<
+      string,
+      { appId: number; genre: string; steamUrl: string; matchedName?: string }
+    > = {};
+    const uncachedAppIds = new Set<number>();
+
+    for (const entry of resolvedList) {
+      const cached = steamGenreCache.get(entry.appId);
+      if (cached && cached.expiresAt > now && cached.genre) {
+        genres[entry.key] = {
+          appId: entry.appId,
+          genre: cached.genre,
+          steamUrl: `https://store.steampowered.com/app/${entry.appId}/`,
+          matchedName: cached.matchedName,
+        };
+      } else {
+        uncachedAppIds.add(entry.appId);
+      }
+    }
+
+    const missingIds = Array.from(uncachedAppIds);
+    if (missingIds.length > 0) {
+      const tagMap = await getSteamTagNameMap();
+      const browseInput = JSON.stringify({
+        ids: missingIds.map((appid) => ({ appid })),
+        context: { language: 'english', country_code: 'US' },
+        data_request: {
+          include_assets: false,
+          include_basic_info: true,
+          include_tag_count: 15,
+        },
+      });
+
+      try {
+        const browseResp = await fetchJsonWithTimeout(
+          `https://api.steampowered.com/IStoreBrowseService/GetItems/v1?input_json=${encodeURIComponent(
+            browseInput
+          )}`,
+          9500
+        ).catch(() => null);
+
+        const storeItems = Array.isArray(browseResp?.response?.store_items)
+          ? browseResp.response.store_items
+          : [];
+
+        for (const si of storeItems) {
+          const idNum = Number(si?.appid);
+          if (!Number.isFinite(idNum) || idNum <= 0) continue;
+          const tagIds: number[] = Array.isArray(si?.tagids) ? si.tagids : [];
+          const tagNames = tagIds
+            .map((id) => tagMap.get(id))
+            .filter((n): n is string => Boolean(n));
+          const genre = resolveAccurateSteamGenre([], tagNames);
+          if (genre) {
+            steamGenreCache.set(idNum, {
+              appId: idNum,
+              genre,
+              matchedName: typeof si?.name === 'string' ? si.name.trim() : undefined,
+              expiresAt: now + STEAM_CACHE_TTL_MS,
+            });
+          }
+        }
+      } catch {
+        // Fallback below
+      }
+
+      // Fallback via appdetails for any appId with no tags resolved
+      const stillMissing = missingIds.filter((idNum) => {
+        const hit = steamGenreCache.get(idNum);
+        return !hit || hit.genre === 'Steam Game';
+      });
+      if (stillMissing.length > 0) {
+        await Promise.all(
+          stillMissing.slice(0, 12).map(async (idNum) => {
+            try {
+              const details = await fetchJsonWithTimeout(
+                `https://store.steampowered.com/api/appdetails?appids=${idNum}&l=english&cc=US`,
+                6500
+              );
+              const data = details?.[String(idNum)]?.data;
+              const officialGenres: string[] = Array.isArray(data?.genres)
+                ? data.genres
+                    .map((g: { description?: string }) => g?.description?.trim())
+                    .filter((g: string | undefined): g is string => Boolean(g))
+                : [];
+              if (officialGenres.length > 0) {
+                const genre = resolveAccurateSteamGenre(officialGenres, []);
+                steamGenreCache.set(idNum, {
+                  appId: idNum,
+                  genre,
+                  matchedName: typeof data?.name === 'string' ? data.name.trim() : undefined,
+                  expiresAt: now + STEAM_CACHE_TTL_MS,
+                });
+              }
+            } catch {
+              // ignore individual fallback error
+            }
+          })
+        );
+      }
+
+      for (const entry of resolvedList) {
+        const resolved = steamGenreCache.get(entry.appId);
+        if (resolved && resolved.genre) {
+          genres[entry.key] = {
+            appId: entry.appId,
+            genre: resolved.genre,
+            steamUrl: `https://store.steampowered.com/app/${entry.appId}/`,
+            matchedName: resolved.matchedName,
+          };
+        }
+      }
+    }
+
+    res.json({ genres });
+  });
+
+  // Google AI (Gemini) PC Compatibility Checker Endpoint (Low-latency + cached)
+  const pcCompatibilityCache = new Map<string, { report: any; expiresAt: number }>();
+
+  app.post('/api/pc-compatibility', async (req: Request, res: Response) => {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      res.status(500).json({
+        error: 'GEMINI_API_KEY is not configured. Please add your API key in Settings > Secrets.',
+      });
+      return;
+    }
+
+    const gameName = typeof req.body?.gameName === 'string' ? req.body.gameName.trim() : '';
+    const userPc = req.body?.userPc || {};
+    const steamSpec = req.body?.steamSpec || {};
+
+    if (!gameName || (!steamSpec?.minimum && !steamSpec?.recommended)) {
+      res.status(400).json({ error: 'Missing game specifications to compare.' });
+      return;
+    }
+
+    const userOs = String(userPc?.os || 'Windows 11 64-bit').trim();
+    const userCpu = String(userPc?.cpu || '').trim();
+    const userRamGb = Number(userPc?.ramGb) > 0 ? Number(userPc.ramGb) : 0;
+    const userGpu = String(userPc?.gpu || '').trim();
+    const userStorageGb = Number(userPc?.storageFreeGb) > 0 ? Number(userPc.storageFreeGb) : 0;
+
+    const findField = (block: any, keys: string[]): string => {
+      const items = Array.isArray(block?.items) ? block.items : [];
+      for (const item of items) {
+        const lbl = String(item?.label || '').toLowerCase();
+        if (keys.some((k) => lbl.includes(k))) {
+          return String(item?.value || '').trim();
+        }
+      }
+      return '';
+    };
+
+    const minOs = findField(steamSpec.minimum, ['os', 'operating']);
+    const recOs = findField(steamSpec.recommended, ['os', 'operating']);
+    const minCpu = findField(steamSpec.minimum, ['processor', 'cpu']);
+    const recCpu = findField(steamSpec.recommended, ['processor', 'cpu']);
+    const minRam = findField(steamSpec.minimum, ['memory', 'ram']);
+    const recRam = findField(steamSpec.recommended, ['memory', 'ram']);
+    const minGpu = findField(steamSpec.minimum, ['graphics', 'gpu', 'video']);
+    const recGpu = findField(steamSpec.recommended, ['graphics', 'gpu', 'video']);
+    const minStorage = findField(steamSpec.minimum, ['storage', 'disk', 'drive']);
+    const recStorage = findField(steamSpec.recommended, ['storage', 'disk', 'drive']);
+
+    const cacheKey = JSON.stringify({
+      gameName: gameName.toLowerCase(),
+      appId: steamSpec?.appId || '',
+      userOs,
+      userCpu: userCpu.toLowerCase(),
+      userRamGb,
+      userGpu: userGpu.toLowerCase(),
+      userStorageGb,
+      minCpu,
+      minRam,
+      minGpu,
+    });
+
+    const now = Date.now();
+    const cached = pcCompatibilityCache.get(cacheKey);
+    if (cached && cached.expiresAt > now) {
+      res.json({ report: cached.report });
+      return;
+    }
+
+    const prompt = [
+      `Game: ${gameName}`,
+      `User PC -> OS: ${userOs} | CPU: ${userCpu || 'Not entered'} | RAM: ${
+        userRamGb > 0 ? `${userRamGb} GB` : 'Not entered'
+      } | GPU: ${userGpu || 'Not entered'} | Free Storage: ${
+        userStorageGb > 0 ? `${userStorageGb} GB` : 'Not entered'
+      }`,
+      `Minimum -> OS: ${minOs || '—'} | CPU: ${minCpu || '—'} | RAM: ${minRam || '—'} | GPU: ${
+        minGpu || '—'
+      } | Storage: ${minStorage || '—'}`,
+      `Recommended -> OS: ${recOs || '—'} | CPU: ${recCpu || '—'} | RAM: ${
+        recRam || '—'
+      } | GPU: ${recGpu || '—'} | Storage: ${recStorage || '—'}`,
+      'Rules: Recognize shorthand/laptop/integrated GPUs & CPUs accurately. If a user part is "Not entered", status="unknown". Each note must be 1 brief Khmer sentence (under 15 words). summaryKm: 1 concise Khmer sentence with expected FPS/settings.',
+    ].join('\n');
+
+    const ai = new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    });
+
+    try {
+      const candidateConfigs: Array<{ model: string; thinkingLevel: ThinkingLevel }> = [
+        { model: 'gemini-3.1-flash-lite', thinkingLevel: ThinkingLevel.MINIMAL },
+        { model: 'gemini-4-hydrogen', thinkingLevel: ThinkingLevel.LOW },
+      ];
+      let response: any = null;
+      let lastErr: any = null;
+
+      for (let attempt = 0; attempt < candidateConfigs.length; attempt++) {
+        const cfg = candidateConfigs[attempt];
+        try {
+          response = await ai.models.generateContent({
+            model: cfg.model,
+            contents: prompt,
+            config: {
+              systemInstruction:
+                'Fast expert PC gaming hardware benchmark evaluator. Return compact JSON strictly following the schema with short natural Khmer feedback.',
+              thinkingConfig: { thinkingLevel: cfg.thinkingLevel },
+              responseMimeType: 'application/json',
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  overall: {
+                    type: Type.STRING,
+                    enum: ['recommended', 'minimum', 'below', 'partial'],
+                  },
+                  headlineEn: { type: Type.STRING },
+                  headlineKm: { type: Type.STRING },
+                  summaryKm: { type: Type.STRING },
+                  osStatus: { type: Type.STRING, enum: ['recommended', 'minimum', 'below', 'unknown'] },
+                  osNote: { type: Type.STRING },
+                  cpuStatus: { type: Type.STRING, enum: ['recommended', 'minimum', 'below', 'unknown'] },
+                  cpuNote: { type: Type.STRING },
+                  ramStatus: { type: Type.STRING, enum: ['recommended', 'minimum', 'below', 'unknown'] },
+                  ramNote: { type: Type.STRING },
+                  gpuStatus: { type: Type.STRING, enum: ['recommended', 'minimum', 'below', 'unknown'] },
+                  gpuNote: { type: Type.STRING },
+                  storageStatus: { type: Type.STRING, enum: ['recommended', 'minimum', 'below', 'unknown'] },
+                  storageNote: { type: Type.STRING },
+                },
+                required: [
+                  'overall',
+                  'headlineEn',
+                  'headlineKm',
+                  'summaryKm',
+                  'osStatus',
+                  'osNote',
+                  'cpuStatus',
+                  'cpuNote',
+                  'ramStatus',
+                  'ramNote',
+                  'gpuStatus',
+                  'gpuNote',
+                  'storageStatus',
+                  'storageNote',
+                ],
+              },
+            },
+          });
+          break;
+        } catch (err: any) {
+          lastErr = err;
+          const status = typeof err?.status === 'number' ? err.status : 0;
+          const msg = String(err?.message || '');
+          const isTransient =
+            [429, 500, 502, 503, 504].includes(status) ||
+            /503|unavailable|high demand|overloaded|429|resource_exhausted/i.test(msg);
+          if (!isTransient || attempt === candidateConfigs.length - 1) {
+            throw err;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 250));
+        }
+      }
+
+      const rawText = (response?.text ?? '').trim();
+      if (!rawText) {
+        if (lastErr) throw lastErr;
+        res.status(502).json({ error: 'Google AI returned an empty analysis response.' });
+        return;
+      }
+
+      const aiData = JSON.parse(rawText);
+      const report = {
+        overall: aiData.overall,
+        headlineEn: aiData.headlineEn,
+        headlineKm: aiData.headlineKm,
+        summaryKm: aiData.summaryKm,
+        analyzedByAi: true,
+        components: [
+          {
+            key: 'os',
+            label: 'OS',
+            labelKm: 'ប្រព័ន្ធប្រតិបត្តិការ',
+            status: aiData.osStatus,
+            userValue: userOs,
+            minValue: minOs || '—',
+            recValue: recOs || '—',
+            note: aiData.osNote,
+          },
+          {
+            key: 'cpu',
+            label: 'Processor (CPU)',
+            labelKm: 'ស៊ីភីយូ (CPU)',
+            status: aiData.cpuStatus,
+            userValue: userCpu || 'Not entered',
+            minValue: minCpu || '—',
+            recValue: recCpu || '—',
+            note: aiData.cpuNote,
+          },
+          {
+            key: 'ram',
+            label: 'Memory (RAM)',
+            labelKm: 'រ៉េម (RAM)',
+            status: aiData.ramStatus,
+            userValue: userRamGb > 0 ? `${userRamGb} GB` : 'Not entered',
+            minValue: minRam || '—',
+            recValue: recRam || '—',
+            note: aiData.ramNote,
+          },
+          {
+            key: 'gpu',
+            label: 'Graphics (GPU)',
+            labelKm: 'ក្រាហ្វិកកាត (GPU)',
+            status: aiData.gpuStatus,
+            userValue: userGpu || 'Not entered',
+            minValue: minGpu || '—',
+            recValue: recGpu || '—',
+            note: aiData.gpuNote,
+          },
+          {
+            key: 'storage',
+            label: 'Storage',
+            labelKm: 'ទំហំផ្ទុក (SSD/HDD)',
+            status: aiData.storageStatus,
+            userValue: userStorageGb > 0 ? `${userStorageGb} GB Free` : 'Not entered',
+            minValue: minStorage || '—',
+            recValue: recStorage || '—',
+            note: aiData.storageNote,
+          },
+        ],
+      };
+
+      pcCompatibilityCache.set(cacheKey, {
+        report,
+        expiresAt: now + STEAM_CACHE_TTL_MS,
+      });
+
+      res.json({ report });
+    } catch (err: any) {
+      let msg = err instanceof Error ? err.message : 'Failed to analyze specs with Google AI.';
+      try {
+        const inner = JSON.parse(msg);
+        if (inner?.error?.message) msg = String(inner.error.message);
+      } catch {
+        // Not JSON string; use msg as-is
+      }
+      const status = typeof err?.status === 'number' ? err.status : 502;
+      res.status(status >= 400 && status < 600 ? status : 502).json({ error: msg });
+    }
   });
 
   const httpServer = http.createServer(app);

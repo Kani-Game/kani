@@ -1,38 +1,92 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { SiteSettings, SteamOnlineCoverSlide } from '../types/game';
 import { DEFAULT_COVER_IMAGE, extractYouTubeVideoId } from './CoverMediaModal';
+import { PromoCoverTarget } from './SteamOnlineCover';
 import { compressImageFile } from '../utils/imageUtils';
 
 interface SteamOnlineCoverFormProps {
+  target?: PromoCoverTarget;
   settings: SiteSettings;
   onSaveSettings: (updated: SiteSettings) => void;
   onShowToast?: (msg: string, type?: 'success' | 'error' | 'info') => void;
   onClose?: () => void;
 }
 
-const createDefaultSlide = (index = 1): SteamOnlineCoverSlide => ({
-  id: `steam_cover_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-  mediaType: 'photo',
-  mediaUrl: DEFAULT_COVER_IMAGE,
-  title: index === 1 ? 'STEAM ONLINE MEGA SALE' : `STEAM ONLINE PROMO #${index}`,
-  subtitle: 'ហ្គេម Steam Online តម្លៃពេញផ្លូវការពី Steam Store និងមានបញ្ចុះតម្លៃពិសេសប្រចាំថ្ងៃ',
-  ctaLabel: 'ទាក់ទង Admin',
-  discountPrefix: 'Up to',
-  discountHighlight: '-50%',
-  showDiscount: true,
-});
+const TARGET_META: Record<
+  PromoCoverTarget,
+  {
+    settingsKey: 'steamOnlineCoverSlides' | 'productCoverSlides' | 'externalCoverSlides';
+    label: string;
+    modalTitle: string;
+    saveButton: string;
+    defaultTitle: string;
+    defaultSubtitle: string;
+    defaultPrefix: string;
+    defaultHighlight: string;
+  }
+> = {
+  'steam-online': {
+    settingsKey: 'steamOnlineCoverSlides',
+    label: 'Steam Online',
+    modalTitle: 'STEAM ONLINE COVER (PHOTO / VIDEO / TEXT)',
+    saveButton: 'SAVE STEAM ONLINE COVER',
+    defaultTitle: 'STEAM ONLINE MEGA SALE',
+    defaultSubtitle: 'ហ្គេម Steam Online តម្លៃពេញផ្លូវការពី Steam Store និងមានបញ្ចុះតម្លៃពិសេសប្រចាំថ្ងៃ',
+    defaultPrefix: 'Up to',
+    defaultHighlight: '-50%',
+  },
+  product: {
+    settingsKey: 'productCoverSlides',
+    label: 'Product',
+    modalTitle: 'PRODUCT COVER (PHOTO / VIDEO / TEXT)',
+    saveButton: 'SAVE PRODUCT COVER',
+    defaultTitle: 'GAMING PRODUCTS & GEAR',
+    defaultSubtitle: 'ទំនិញគ្រឿងបន្លាស់ ឧបករណ៍ហ្គេម External HDD Controller Keyboard និង Accessories គុណភាពខ្ពស់',
+    defaultPrefix: 'Shop',
+    defaultHighlight: 'HOT GEAR',
+  },
+  external: {
+    settingsKey: 'externalCoverSlides',
+    label: 'GameថែមExternal',
+    modalTitle: 'GAME ថែម EXTERNAL COVER (PHOTO / VIDEO / TEXT)',
+    saveButton: 'SAVE EXTERNAL COVER',
+    defaultTitle: 'GAME ថែមពេលទិញ EXTERNAL',
+    defaultSubtitle: 'ជ្រើសរើសហ្គេម PC ពេញនិយមជាច្រើនដោយឥតគិតថ្លៃ នៅពេលទិញ External Hard Disk ពីហាងយើងខ្ញុំ',
+    defaultPrefix: 'External',
+    defaultHighlight: 'FREE GAMES',
+  },
+};
+
+const createDefaultSlide = (target: PromoCoverTarget, index = 1): SteamOnlineCoverSlide => {
+  const meta = TARGET_META[target];
+  return {
+    id: `${target}_cover_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    mediaType: 'photo',
+    mediaUrl: DEFAULT_COVER_IMAGE,
+    title: index === 1 ? meta.defaultTitle : `${meta.label.toUpperCase()} PROMO #${index}`,
+    subtitle: meta.defaultSubtitle,
+    ctaLabel: 'ទាក់ទង Admin',
+    discountPrefix: meta.defaultPrefix,
+    discountHighlight: meta.defaultHighlight,
+    showDiscount: true,
+  };
+};
 
 export const SteamOnlineCoverForm: React.FC<SteamOnlineCoverFormProps> = ({
+  target = 'steam-online',
   settings,
   onSaveSettings,
   onShowToast,
   onClose,
 }) => {
+  const meta = TARGET_META[target];
+  const savedSlidesForTarget = settings[meta.settingsKey];
+
   const getInitialSlides = (): SteamOnlineCoverSlide[] => {
-    if (Array.isArray(settings.steamOnlineCoverSlides) && settings.steamOnlineCoverSlides.length > 0) {
-      return settings.steamOnlineCoverSlides.map((s) => ({ ...s }));
+    if (Array.isArray(savedSlidesForTarget) && savedSlidesForTarget.length > 0) {
+      return savedSlidesForTarget.map((s) => ({ ...s }));
     }
-    return [createDefaultSlide(1)];
+    return [createDefaultSlide(target, 1)];
   };
 
   const [slides, setSlides] = useState<SteamOnlineCoverSlide[]>(getInitialSlides);
@@ -43,13 +97,16 @@ export const SteamOnlineCoverForm: React.FC<SteamOnlineCoverFormProps> = ({
   const videoInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (Array.isArray(settings.steamOnlineCoverSlides) && settings.steamOnlineCoverSlides.length > 0) {
-      setSlides(settings.steamOnlineCoverSlides.map((s) => ({ ...s })));
+    if (Array.isArray(savedSlidesForTarget) && savedSlidesForTarget.length > 0) {
+      setSlides(savedSlidesForTarget.map((s) => ({ ...s })));
+    } else {
+      setSlides([createDefaultSlide(target, 1)]);
     }
-  }, [settings.steamOnlineCoverSlides]);
+    setActiveSlideIdx(0);
+  }, [target, savedSlidesForTarget]);
 
   const safeIdx = Math.min(activeSlideIdx, Math.max(0, slides.length - 1));
-  const currentSlide = slides[safeIdx] || createDefaultSlide(1);
+  const currentSlide = slides[safeIdx] || createDefaultSlide(target, 1);
 
   const updateCurrentSlide = (patch: Partial<SteamOnlineCoverSlide>) => {
     setSlides((prev) =>
@@ -73,11 +130,12 @@ export const SteamOnlineCoverForm: React.FC<SteamOnlineCoverFormProps> = ({
 
     setIsUploading('photo');
     try {
-      const compressed = await compressImageFile(file, 1400, 900, 0.85);
+      const compressed = await compressImageFile(file, 1200, 720, 0.8, 180_000);
       updateCurrentSlide({ mediaType: 'photo', mediaUrl: compressed });
-      onShowToast?.('បានបញ្ចូលរូបភាព Cover រួចរាល់! សូមចុច Save Steam Online Cover');
-    } catch {
-      onShowToast?.('បរាជ័យក្នុងការបញ្ចូលរូបភាព', 'error');
+      onShowToast?.(`បានបញ្ចូលរូបភាព Cover ${meta.label} រួចរាល់! សូមចុច Save ដើម្បីរក្សាទុក`);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'បរាជ័យក្នុងការបញ្ចូលរូបភាព';
+      onShowToast?.(msg, 'error');
     } finally {
       setIsUploading(null);
     }
@@ -112,7 +170,7 @@ export const SteamOnlineCoverForm: React.FC<SteamOnlineCoverFormProps> = ({
         throw new Error(payload?.error || 'Upload failed');
       }
       updateCurrentSlide({ mediaType: 'video', mediaUrl: payload.url });
-      onShowToast?.('បានបញ្ចូលវីដេអូ Cover រួចរាល់! សូមចុច Save Steam Online Cover');
+      onShowToast?.(`បានបញ្ចូលវីដេអូ Cover ${meta.label} រួចរាល់! សូមចុច Save ដើម្បីរក្សាទុក`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Failed to upload video';
       onShowToast?.(`Upload វីដេអូមិនបានសម្រេច: ${msg}`, 'error');
@@ -122,7 +180,7 @@ export const SteamOnlineCoverForm: React.FC<SteamOnlineCoverFormProps> = ({
   };
 
   const handleAddSlide = () => {
-    const nextSlide = createDefaultSlide(slides.length + 1);
+    const nextSlide = createDefaultSlide(target, slides.length + 1);
     const nextSlides = [...slides, nextSlide];
     setSlides(nextSlides);
     setActiveSlideIdx(nextSlides.length - 1);
@@ -143,7 +201,7 @@ export const SteamOnlineCoverForm: React.FC<SteamOnlineCoverFormProps> = ({
     const cleaned = slides.map((s) => ({
       ...s,
       mediaUrl: s.mediaUrl?.trim() || DEFAULT_COVER_IMAGE,
-      title: s.title?.trim() || 'STEAM ONLINE STORE',
+      title: s.title?.trim() || meta.defaultTitle,
       subtitle: s.subtitle?.trim() || '',
       ctaLabel: s.ctaLabel?.trim() || '',
       discountPrefix: s.discountPrefix?.trim() || '',
@@ -153,21 +211,21 @@ export const SteamOnlineCoverForm: React.FC<SteamOnlineCoverFormProps> = ({
 
     onSaveSettings({
       ...settings,
-      steamOnlineCoverSlides: cleaned,
+      [meta.settingsKey]: cleaned,
     });
-    onShowToast?.('🎉 បានរក្សាទុក Cover Steam Online (Photo/Video/Text & Discount) រួចរាល់!');
+    onShowToast?.(`🎉 បានរក្សាទុក Cover ${meta.label} (Photo/Video/Text) រួចរាល់!`);
     onClose?.();
   };
 
   const handleResetDefault = () => {
-    const fresh = [createDefaultSlide(1)];
+    const fresh = [createDefaultSlide(target, 1)];
     setSlides(fresh);
     setActiveSlideIdx(0);
     onSaveSettings({
       ...settings,
-      steamOnlineCoverSlides: [],
+      [meta.settingsKey]: [],
     });
-    onShowToast?.('បានត្រឡប់ទៅ Steam Online Cover ដើមវិញរួចរាល់!');
+    onShowToast?.(`បានត្រឡប់ទៅ Cover ${meta.label} ដើមវិញរួចរាល់!`);
   };
 
   const youtubeId =
@@ -216,66 +274,168 @@ export const SteamOnlineCoverForm: React.FC<SteamOnlineCoverFormProps> = ({
       </div>
 
       {/* Live Preview */}
-      <div className="relative h-44 sm:h-52 rounded-xl overflow-hidden bg-[#06090f] border border-slate-700/80 flex items-center">
-        {currentSlide.mediaType === 'video' && currentSlide.mediaUrl?.trim() ? (
-          youtubeId ? (
-            <iframe
-              src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=1&loop=1&playlist=${youtubeId}&controls=0&rel=0`}
-              title="Steam Online Cover Video Preview"
-              className="absolute inset-0 w-full h-full pointer-events-none scale-125 opacity-75"
-              allow="autoplay; encrypted-media"
-            />
-          ) : (
-            <video
-              key={currentSlide.mediaUrl}
-              src={currentSlide.mediaUrl}
-              autoPlay
-              loop
-              muted
-              playsInline
-              className="absolute inset-0 w-full h-full object-cover opacity-75"
-            />
-          )
-        ) : (
-          <img
-            src={currentSlide.mediaUrl || DEFAULT_COVER_IMAGE}
-            alt="Cover Preview"
-            referrerPolicy="no-referrer"
-            className="absolute inset-0 w-full h-full object-cover opacity-70"
-          />
-        )}
-
-        <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#06090f] via-[#06090f]/75 to-transparent" />
-
-        <div className="relative z-10 p-5 max-w-md space-y-2">
-          {currentSlide.showDiscount !== false &&
-            (currentSlide.discountPrefix || currentSlide.discountHighlight) && (
-              <div className="inline-flex items-stretch">
-                {currentSlide.discountPrefix && (
-                  <div className="px-2 py-1 bg-gradient-to-b from-[#0ea5e9] to-[#0077e6] -skew-x-12 flex items-center rounded-l-[3px]">
-                    <span className="skew-x-12 text-white font-sans font-extrabold text-[11px] leading-none">
-                      {currentSlide.discountPrefix}
-                    </span>
-                  </div>
-                )}
-                {currentSlide.discountHighlight && (
-                  <div className="px-2.5 py-1 bg-gradient-to-b from-[#ff6a13] to-[#ea4200] -skew-x-12 -ml-0.5 flex items-center rounded-r-[3px]">
-                    <span className="skew-x-12 text-white font-sans font-black text-sm leading-none">
-                      {currentSlide.discountHighlight}
-                    </span>
-                  </div>
-                )}
+      {target === 'product' ? (
+        <div className="rounded-xl overflow-hidden bg-[#0a0f1a] border border-sky-500/35 grid grid-cols-12 h-44 sm:h-48">
+          <div className="col-span-5 p-4 flex flex-col justify-between bg-[#0d1524] border-r border-slate-800">
+            <div className="space-y-1.5">
+              <div className="text-[10px] font-rajdhani font-bold uppercase text-sky-400 truncate">
+                Hardware &amp; Gear
+                {currentSlide.showDiscount !== false && (currentSlide.discountPrefix || currentSlide.discountHighlight)
+                  ? ` · ${[currentSlide.discountPrefix, currentSlide.discountHighlight].filter(Boolean).join(' ')}`
+                  : ''}
               </div>
-            )}
-
-          <div className="font-g2a-display font-black uppercase text-white text-lg sm:text-xl leading-tight line-clamp-2">
-            {currentSlide.title || 'STEAM ONLINE COVER'}
+              <div className="font-orbitron font-black text-white text-sm sm:text-base leading-tight line-clamp-2">
+                {currentSlide.title || meta.defaultTitle}
+              </div>
+              {currentSlide.subtitle && (
+                <p className="text-[10px] text-slate-300 line-clamp-2">{currentSlide.subtitle}</p>
+              )}
+            </div>
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-sky-500 text-slate-950 font-orbitron font-bold text-[10px] w-fit">
+              <span>{currentSlide.ctaLabel || 'ទាក់ទង Admin'}</span>
+            </div>
           </div>
-          {currentSlide.subtitle && (
-            <p className="text-[11px] text-slate-300 line-clamp-2">{currentSlide.subtitle}</p>
-          )}
+          <div className="col-span-7 relative overflow-hidden bg-[#060911]">
+            {currentSlide.mediaType === 'video' && currentSlide.mediaUrl?.trim() ? (
+              youtubeId ? (
+                <iframe
+                  src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=1&loop=1&playlist=${youtubeId}&controls=0&rel=0`}
+                  title="Product Cover Video Preview"
+                  className="absolute inset-0 w-full h-full pointer-events-none scale-125"
+                  allow="autoplay; encrypted-media"
+                />
+              ) : (
+                <video
+                  key={currentSlide.mediaUrl}
+                  src={currentSlide.mediaUrl}
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+              )
+            ) : (
+              <img
+                src={currentSlide.mediaUrl || DEFAULT_COVER_IMAGE}
+                alt="Product Cover Preview"
+                referrerPolicy="no-referrer"
+                className="absolute inset-0 w-full h-full object-cover"
+              />
+            )}
+          </div>
         </div>
-      </div>
+      ) : target === 'external' ? (
+        <div className="rounded-xl overflow-hidden bg-[#060d12] border border-emerald-500/35 flex flex-col h-48 sm:h-52">
+          <div className="relative flex-1 overflow-hidden bg-[#050b0f]">
+            {currentSlide.mediaType === 'video' && currentSlide.mediaUrl?.trim() ? (
+              youtubeId ? (
+                <iframe
+                  src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=1&loop=1&playlist=${youtubeId}&controls=0&rel=0`}
+                  title="External Cover Video Preview"
+                  className="absolute inset-0 w-full h-full pointer-events-none scale-125"
+                  allow="autoplay; encrypted-media"
+                />
+              ) : (
+                <video
+                  key={currentSlide.mediaUrl}
+                  src={currentSlide.mediaUrl}
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  className="absolute inset-0 w-full h-full object-cover"
+                />
+              )
+            ) : (
+              <img
+                src={currentSlide.mediaUrl || DEFAULT_COVER_IMAGE}
+                alt="External Cover Preview"
+                referrerPolicy="no-referrer"
+                className="absolute inset-0 w-full h-full object-cover"
+              />
+            )}
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#060f16] via-transparent to-transparent" />
+          </div>
+          <div className="px-4 py-2.5 bg-[#060f16] border-t border-emerald-500/25 flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="text-[10px] font-rajdhani font-bold uppercase text-emerald-400 truncate">
+                External HDD Bonus
+                {currentSlide.showDiscount !== false && (currentSlide.discountPrefix || currentSlide.discountHighlight)
+                  ? ` · ${[currentSlide.discountPrefix, currentSlide.discountHighlight].filter(Boolean).join(' ')}`
+                  : ''}
+              </div>
+              <div className="font-orbitron font-black text-white text-xs sm:text-sm truncate">
+                {currentSlide.title || meta.defaultTitle}
+              </div>
+            </div>
+            <span className="px-2.5 py-1 rounded-lg bg-emerald-500 text-slate-950 font-orbitron font-bold text-[10px] shrink-0">
+              {currentSlide.ctaLabel || 'ទាក់ទង Admin'}
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className="relative h-44 sm:h-52 rounded-xl overflow-hidden bg-[#06090f] border border-slate-700/80 flex items-center">
+          {currentSlide.mediaType === 'video' && currentSlide.mediaUrl?.trim() ? (
+            youtubeId ? (
+              <iframe
+                src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=1&loop=1&playlist=${youtubeId}&controls=0&rel=0`}
+                title="Steam Online Cover Video Preview"
+                className="absolute inset-0 w-full h-full pointer-events-none scale-125 opacity-75"
+                allow="autoplay; encrypted-media"
+              />
+            ) : (
+              <video
+                key={currentSlide.mediaUrl}
+                src={currentSlide.mediaUrl}
+                autoPlay
+                loop
+                muted
+                playsInline
+                className="absolute inset-0 w-full h-full object-cover opacity-75"
+              />
+            )
+          ) : (
+            <img
+              src={currentSlide.mediaUrl || DEFAULT_COVER_IMAGE}
+              alt="Cover Preview"
+              referrerPolicy="no-referrer"
+              className="absolute inset-0 w-full h-full object-cover opacity-70"
+            />
+          )}
+
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#06090f] via-[#06090f]/75 to-transparent" />
+
+          <div className="relative z-10 p-5 max-w-md space-y-2">
+            {currentSlide.showDiscount !== false &&
+              (currentSlide.discountPrefix || currentSlide.discountHighlight) && (
+                <div className="inline-flex items-stretch">
+                  {currentSlide.discountPrefix && (
+                    <div className="px-2 py-1 bg-gradient-to-b from-[#0ea5e9] to-[#0077e6] -skew-x-12 flex items-center rounded-l-[3px]">
+                      <span className="skew-x-12 text-white font-sans font-extrabold text-[11px] leading-none">
+                        {currentSlide.discountPrefix}
+                      </span>
+                    </div>
+                  )}
+                  {currentSlide.discountHighlight && (
+                    <div className="px-2.5 py-1 bg-gradient-to-b from-[#ff6a13] to-[#ea4200] -skew-x-12 -ml-0.5 flex items-center rounded-r-[3px]">
+                      <span className="skew-x-12 text-white font-sans font-black text-sm leading-none">
+                        {currentSlide.discountHighlight}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+            <div className="font-g2a-display font-black uppercase text-white text-lg sm:text-xl leading-tight line-clamp-2">
+              {currentSlide.title || meta.defaultTitle}
+            </div>
+            {currentSlide.subtitle && (
+              <p className="text-[11px] text-slate-300 line-clamp-2">{currentSlide.subtitle}</p>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Media Type Switcher + Upload/URL */}
       <div className="space-y-3 p-4 rounded-xl bg-[#0b1120] border border-slate-800">
@@ -510,7 +670,7 @@ export const SteamOnlineCoverForm: React.FC<SteamOnlineCoverFormProps> = ({
             className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#0ea5e9] via-[#0077e6] to-[#ff5a00] hover:opacity-95 disabled:opacity-50 text-white font-orbitron font-bold text-xs shadow-lg flex items-center gap-2 transition cursor-pointer"
           >
             <i className="fa-solid fa-floppy-disk"></i>
-            <span>SAVE STEAM ONLINE COVER</span>
+            <span>{meta.saveButton}</span>
           </button>
         </div>
       </div>
@@ -521,6 +681,7 @@ export const SteamOnlineCoverForm: React.FC<SteamOnlineCoverFormProps> = ({
 interface SteamOnlineCoverModalProps {
   isOpen: boolean;
   onClose: () => void;
+  target?: PromoCoverTarget;
   settings: SiteSettings;
   onSaveSettings: (updated: SiteSettings) => void;
   onShowToast?: (msg: string, type?: 'success' | 'error' | 'info') => void;
@@ -529,11 +690,13 @@ interface SteamOnlineCoverModalProps {
 export const SteamOnlineCoverModal: React.FC<SteamOnlineCoverModalProps> = ({
   isOpen,
   onClose,
+  target = 'steam-online',
   settings,
   onSaveSettings,
   onShowToast,
 }) => {
   if (!isOpen) return null;
+  const meta = TARGET_META[target];
 
   return (
     <div
@@ -551,10 +714,10 @@ export const SteamOnlineCoverModal: React.FC<SteamOnlineCoverModalProps> = ({
             </div>
             <div>
               <h3 className="font-orbitron font-bold text-base text-white">
-                STEAM ONLINE COVER (PHOTO / VIDEO / TEXT)
+                {meta.modalTitle}
               </h3>
               <p className="text-xs text-gray-400">
-                Add Photo or Video, custom Headline/Subtitle text, and Discount ribbon style
+                Add Photo or Video, custom Headline/Subtitle text, and Promo ribbon style for {meta.label}
               </p>
             </div>
           </div>
@@ -569,6 +732,7 @@ export const SteamOnlineCoverModal: React.FC<SteamOnlineCoverModalProps> = ({
         </div>
 
         <SteamOnlineCoverForm
+          target={target}
           settings={settings}
           onSaveSettings={onSaveSettings}
           onShowToast={onShowToast}

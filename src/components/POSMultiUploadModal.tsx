@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import { Game, SteamSpecData } from '../types/game';
-import { compressImageFile } from '../utils/imageUtils';
+import { compressDataUrl, compressImageFile } from '../utils/imageUtils';
 import { extractSteamAppId, fetchSteamSpec } from '../services/steamService';
 
 interface POSMultiUploadModalProps {
@@ -222,6 +222,7 @@ export const POSMultiUploadModal: React.FC<POSMultiUploadModalProps> = ({
     setProcessedCount(0);
 
     const newItems: BatchItem[] = [];
+    let failedCount = 0;
 
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
@@ -233,7 +234,7 @@ export const POSMultiUploadModal: React.FC<POSMultiUploadModalProps> = ({
         .trim();
 
       try {
-        const compressedBase64 = await compressImageFile(file, 640, 850, 0.8);
+        const compressedBase64 = await compressImageFile(file, 640, 850, 0.8, 450_000);
         newItems.push({
           id: `batch_${Date.now()}_${i}_${Math.random().toString(36).substring(2, 6)}`,
           name: cleanName || `Game Product #${items.length + i + 1}`,
@@ -247,15 +248,25 @@ export const POSMultiUploadModal: React.FC<POSMultiUploadModalProps> = ({
           steamStatus: 'idle',
         });
       } catch (err) {
+        failedCount++;
         console.error('Failed to compress file', file.name, err);
       }
 
       setProcessedCount((prev) => prev + 1);
     }
 
-    setItems((prev) => [...prev, ...newItems]);
+    if (newItems.length > 0) {
+      setItems((prev) => [...prev, ...newItems]);
+      onShowToast(
+        failedCount > 0
+          ? `បានបន្ថែម ${newItems.length} ផលិតផល (${failedCount} រូបភាពធំពេក មិនអាចបង្រួមបាន)`
+          : `បានបន្ថែម ${newItems.length} ផលិតផលចូលក្នុងបញ្ជី Multi-Upload!`,
+        failedCount > 0 ? 'info' : 'success'
+      );
+    } else if (failedCount > 0) {
+      onShowToast('រូបភាពទាំងអស់ធំពេក ឬមិនត្រឹមត្រូវ មិនអាចបង្រួមសម្រាប់ Cloud Sync បានទេ!', 'error');
+    }
     setIsProcessingFiles(false);
-    onShowToast(`បានបន្ថែម ${newItems.length} ផលិតផលចូលក្នុងបញ្ជី Multi-Upload!`, 'success');
 
     if (multiFileInputRef.current) {
       multiFileInputRef.current.value = '';
@@ -349,7 +360,7 @@ export const POSMultiUploadModal: React.FC<POSMultiUploadModalProps> = ({
     setItems((prev) => prev.filter((item) => item.id !== id));
   };
 
-  const handleSaveAll = () => {
+  const handleSaveAll = async () => {
     if (items.length === 0) {
       onShowToast('សូម Upload រូបភាព ឬបញ្ចូលផលិតផលយ៉ាងហោច 1 ដំបូង!', 'error');
       return;
@@ -361,19 +372,32 @@ export const POSMultiUploadModal: React.FC<POSMultiUploadModalProps> = ({
       return;
     }
 
-    const payload: (Omit<Game, 'id'> & { id?: string })[] = items.map((item) => ({
-      name: item.name.trim(),
-      tag: item.tag.trim() || 'Steam Offline',
-      genre: item.genre.trim() || 'General',
-      price: item.price >= 0 ? item.price : 0,
-      img: item.img || DEFAULT_COVER,
-      link: item.link?.trim() || undefined,
-      barcode: item.barcode || generateSku(),
-      description: item.description.trim() || undefined,
-      steamSpec: item.skipSteamLink ? undefined : item.steamSpec,
-      skipSteamLink: Boolean(item.skipSteamLink),
-      createdAt: new Date().toISOString(),
-    }));
+    const payload: (Omit<Game, 'id'> & { id?: string })[] = [];
+    for (const item of items) {
+      let safeImg = item.img || DEFAULT_COVER;
+      if (safeImg.startsWith('data:image/') && safeImg.length > 480_000) {
+        try {
+          safeImg = await compressDataUrl(safeImg, 640, 850, 0.8, 450_000);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : 'Image exceeds cloud sync limit';
+          onShowToast(`"${item.name}": ${msg}`, 'error');
+          return;
+        }
+      }
+      payload.push({
+        name: item.name.trim(),
+        tag: item.tag.trim() || 'Steam Offline',
+        genre: item.genre.trim() || 'General',
+        price: item.price >= 0 ? item.price : 0,
+        img: safeImg,
+        link: item.link?.trim() || undefined,
+        barcode: item.barcode || generateSku(),
+        description: item.description.trim() || undefined,
+        steamSpec: item.skipSteamLink ? undefined : item.steamSpec,
+        skipSteamLink: Boolean(item.skipSteamLink),
+        createdAt: new Date().toISOString(),
+      });
+    }
 
     onSaveMultipleProducts(payload);
     onShowToast(`🎉 បានបញ្ចូល ${items.length} ផលិតផលក្នុង POS និង Storefront រួចរាល់!`, 'success');

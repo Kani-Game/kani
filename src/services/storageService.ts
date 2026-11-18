@@ -31,14 +31,37 @@ function cleanFirestoreDoc<T extends Record<string, any>>(obj: T): Record<string
   return cleanFirestoreValue(obj) as Record<string, any>;
 }
 
-// Guarantees every Game write satisfies firestore.rules (isValidGame) so descriptions never silently fail to persist
+// Compute UTF-8 byte length accurately (Firestore rules string.size() measures UTF-8 bytes)
+function getUtf8ByteLength(str: string): number {
+  if (typeof TextEncoder !== 'undefined') {
+    return new TextEncoder().encode(str).length;
+  }
+  return unescape(encodeURIComponent(str)).length;
+}
+
+function truncateUtf8(str: string, maxBytes: number): string {
+  if (!str) return '';
+  if (getUtf8ByteLength(str) <= maxBytes) return str;
+  let out = '';
+  let bytes = 0;
+  for (const ch of str) {
+    const chBytes = getUtf8ByteLength(ch);
+    if (bytes + chBytes > maxBytes) break;
+    out += ch;
+    bytes += chBytes;
+  }
+  return out;
+}
+
+// Guarantees every Game write satisfies firestore.rules (isValidGame) & stays under Firestore 1 MiB document limit
 function prepareGameForFirestore(game: Game): Record<string, any> {
-  const safeName = (game.name || 'Untitled Game').trim().slice(0, 300) || 'Untitled Game';
-  const safeTag = (game.tag || 'Steam Offline').trim().slice(0, 100) || 'Steam Offline';
-  const safeGenre = (game.genre || 'General').trim().slice(0, 100) || 'General';
+  const safeName = truncateUtf8((game.name || 'Untitled Game').trim(), 290) || 'Untitled Game';
+  const safeTag = truncateUtf8((game.tag || 'Steam Offline').trim(), 96) || 'Steam Offline';
+  const safeGenre = truncateUtf8((game.genre || 'General').trim(), 96) || 'General';
   const safeImg =
     (game.img || '').trim() || 'https://placehold.co/600x800/131b2e/ffffff?text=Game';
-  return cleanFirestoreDoc({
+
+  const cleaned = cleanFirestoreDoc({
     ...game,
     id: sanitizeFirestoreId(game.id),
     name: safeName,
@@ -46,6 +69,21 @@ function prepareGameForFirestore(game: Game): Record<string, any> {
     genre: safeGenre,
     img: safeImg,
   });
+
+  if (getUtf8ByteLength(safeImg) > 950_000) {
+    throw new Error('Image is too large (>950KB) for cloud sync. Please upload a smaller or compressed image.');
+  }
+
+  let byteSize = getUtf8ByteLength(JSON.stringify(cleaned));
+  if (byteSize > 950_000 && cleaned.steamSpec) {
+    delete cleaned.steamSpec;
+    byteSize = getUtf8ByteLength(JSON.stringify(cleaned));
+  }
+  if (byteSize > 980_000) {
+    throw new Error('Product data exceeds Firestore 1MB limit. Please shorten description or use a smaller image.');
+  }
+
+  return cleaned;
 }
 
 // Guarantees all IDs strictly match Firestore rules regex '^[a-zA-Z0-9_\-]+$' and length <= 120
@@ -85,10 +123,64 @@ async function atomicBatchDelete(collName: string, ids: string[]): Promise<void>
   }
 }
 
-// Mutex flags to prevent race condition when Firestore emits intermediate snapshots during large uploads
+// Mutex flags & pending op trackers to prevent race conditions when Firestore emits snapshots during uploads
 let isBatchWritingReportRows = false;
 let isBatchWritingGames = false;
 let isBatchWritingExpenses = false;
+let hasReceivedCloudGamesSnapshot = false;
+
+const STORAGE_KEY_PENDING_GAME_OPS = 'kanigame_pending_game_ops_v1';
+
+interface PendingGameOp {
+  type: 'upsert' | 'delete';
+  id: string;
+  game?: Game;
+  updatedAt: number;
+}
+
+const syncErrorListeners = new Set<(message: string) => void>();
+function emitSyncError(message: string) {
+  syncErrorListeners.forEach((cb) => {
+    try {
+      cb(message);
+    } catch {}
+  });
+}
+
+function isPermanentFirestoreWriteError(err: unknown): boolean {
+  const code = (err as any)?.code ? String((err as any).code).toLowerCase() : '';
+  const msg = err instanceof Error ? err.message.toLowerCase() : String(err).toLowerCase();
+  return (
+    code.includes('permission-denied') ||
+    code.includes('invalid-argument') ||
+    msg.includes('permission-denied') ||
+    msg.includes('missing or insufficient permissions') ||
+    msg.includes('exceeds') ||
+    msg.includes('maximum') ||
+    msg.includes('too large') ||
+    msg.includes('invalid data')
+  );
+}
+
+function readPendingGameOps(): Record<string, PendingGameOp> {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY_PENDING_GAME_OPS);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') return parsed;
+  } catch {}
+  return {};
+}
+
+function writePendingGameOps(ops: Record<string, PendingGameOp>): void {
+  try {
+    if (Object.keys(ops).length === 0) {
+      localStorage.removeItem(STORAGE_KEY_PENDING_GAME_OPS);
+    } else {
+      localStorage.setItem(STORAGE_KEY_PENDING_GAME_OPS, JSON.stringify(ops));
+    }
+  } catch {}
+}
 
 const STORAGE_KEY_GAMES = 'kanigame_catalog_v1';
 const STORAGE_KEY_SETTINGS = 'kanigame_settings_v1';
@@ -464,8 +556,106 @@ let cachedGames: Game[] | null = null;
 let cachedUserAccounts: UserAccountsConfig | null = null;
 const syncedCodebaseIds = new Set<string>();
 const pendingLocalUpdates = new Map<string, { game: Game; expiresAt: number }>();
+const pendingLocalDeletes = new Map<string, number>();
+
+function recordPendingUpsert(game: Game): number {
+  const id = sanitizeFirestoreId(game.id);
+  const now = Date.now();
+  pendingLocalDeletes.delete(id);
+  pendingLocalUpdates.set(id, { game: { ...game, id }, expiresAt: now + 30000 });
+  const ops = readPendingGameOps();
+  ops[id] = { type: 'upsert', id, game: { ...game, id }, updatedAt: now };
+  writePendingGameOps(ops);
+  return now;
+}
+
+function recordPendingDelete(rawId: string): number {
+  const id = sanitizeFirestoreId(rawId);
+  const now = Date.now();
+  pendingLocalUpdates.delete(id);
+  pendingLocalDeletes.set(id, now + 30000);
+  const ops = readPendingGameOps();
+  ops[id] = { type: 'delete', id, updatedAt: now };
+  writePendingGameOps(ops);
+  return now;
+}
+
+function resolvePendingOp(rawId: string, opTimestamp: number): void {
+  const id = sanitizeFirestoreId(rawId);
+  const ops = readPendingGameOps();
+  if (ops[id] && ops[id].updatedAt <= opTimestamp) {
+    delete ops[id];
+    writePendingGameOps(ops);
+  }
+}
+
+async function syncSingleGameUpsertToFirestore(game: Game, opTimestamp: number): Promise<void> {
+  const id = sanitizeFirestoreId(game.id);
+  try {
+    const payload = prepareGameForFirestore({ ...game, id });
+    await setDoc(doc(db, 'games', id), payload);
+    resolvePendingOp(id, opTimestamp);
+  } catch (err) {
+    console.warn('Firestore game upsert warning:', err);
+    if (isPermanentFirestoreWriteError(err)) {
+      resolvePendingOp(id, opTimestamp);
+      pendingLocalUpdates.delete(id);
+      const reason = err instanceof Error ? err.message : 'Cloud validation rejected item';
+      emitSyncError(`Sync failed for "${game.name}": ${reason}`);
+    }
+  }
+}
+
+async function syncSingleGameDeleteToFirestore(rawId: string, opTimestamp: number): Promise<void> {
+  const id = sanitizeFirestoreId(rawId);
+  try {
+    await deleteDoc(doc(db, 'games', id));
+    resolvePendingOp(id, opTimestamp);
+  } catch (err) {
+    console.warn('Firestore deleteGame warning:', err);
+    if (isPermanentFirestoreWriteError(err)) {
+      resolvePendingOp(id, opTimestamp);
+      pendingLocalDeletes.delete(id);
+      emitSyncError(`Could not delete item (${id}) from cloud: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+}
+
+let isFlushingPendingOps = false;
+async function flushPendingGameOps(): Promise<void> {
+  if (isFlushingPendingOps) return;
+  const ops = readPendingGameOps();
+  const entries = Object.values(ops);
+  if (entries.length === 0) return;
+
+  isFlushingPendingOps = true;
+  try {
+    for (const op of entries) {
+      if (op.type === 'upsert' && op.game) {
+        await syncSingleGameUpsertToFirestore(op.game, op.updatedAt);
+      } else if (op.type === 'delete') {
+        await syncSingleGameDeleteToFirestore(op.id, op.updatedAt);
+      }
+    }
+  } finally {
+    isFlushingPendingOps = false;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', () => {
+    void flushPendingGameOps();
+  });
+}
 
 export const StorageService = {
+  subscribeToSyncErrors(listener: (message: string) => void): () => void {
+    syncErrorListeners.add(listener);
+    return () => {
+      syncErrorListeners.delete(listener);
+    };
+  },
+
   getMissingFromCodebase(existingGames: Game[]): Game[] {
     const existingIds = new Set(existingGames.map((g) => g.id));
     const existingKeys = new Set(existingGames.map((g) => getGameDedupeKey(g)));
@@ -526,6 +716,10 @@ export const StorageService = {
     try {
       const idbData = await idbGet<Game[]>(STORAGE_KEY_GAMES);
       if (idbData && Array.isArray(idbData) && idbData.length > 0) {
+        // Do not overwrite newer cloud snapshot if Firestore already delivered data
+        if (hasReceivedCloudGamesSnapshot && cachedGames && cachedGames.length > 0) {
+          return cachedGames;
+        }
         const merged = this.mergeWithLatestCodebase(idbData);
         cachedGames = merged;
         try {
@@ -581,25 +775,73 @@ export const StorageService = {
   // Real-time Cloud Firestore Listener: Syncs across Chrome, Firefox, Netlify & Mobile
   subscribeToGames(callback: (games: Game[]) => void): () => void {
     const collRef = collection(db, 'games');
+    // Flush any queued pending operations from previous session if online
+    void flushPendingGameOps();
+
     const unsubscribe = onSnapshot(
       collRef,
       (snapshot) => {
         if (!snapshot.empty) {
+          hasReceivedCloudGamesSnapshot = true;
           const now = Date.now();
+          const persistentOps = readPendingGameOps();
           const cloudGames: Game[] = [];
+          const seenIds = new Set<string>();
+
           snapshot.forEach((docSnap) => {
-            const docData = docSnap.data() as Game;
-            const pending = pendingLocalUpdates.get(docData.id);
-            if (pending && pending.expiresAt > now) {
-              cloudGames.push(pending.game);
+            const rawDoc = docSnap.data() as Game;
+            const docId = sanitizeFirestoreId(rawDoc.id || docSnap.id);
+            const docData: Game = { ...rawDoc, id: docId };
+
+            // Keep deleted items hidden while delete is pending confirmation
+            const pendingDeleteExpiry = pendingLocalDeletes.get(docId);
+            const persistentOp = persistentOps[docId];
+            if (
+              (pendingDeleteExpiry && pendingDeleteExpiry > now) ||
+              persistentOp?.type === 'delete'
+            ) {
+              return;
+            }
+            if (pendingDeleteExpiry) pendingLocalDeletes.delete(docId);
+
+            seenIds.add(docId);
+
+            const pendingUpdate = pendingLocalUpdates.get(docId);
+            if (persistentOp?.type === 'upsert' && persistentOp.game) {
+              cloudGames.push(persistentOp.game);
+            } else if (pendingUpdate && pendingUpdate.expiresAt > now) {
+              cloudGames.push(pendingUpdate.game);
             } else {
-              if (pending) pendingLocalUpdates.delete(docData.id);
+              if (pendingUpdate) pendingLocalUpdates.delete(docId);
               cloudGames.push(docData);
             }
           });
+
+          // Preserve any locally added games whose Firestore write is still in-flight or queued
+          const pendingAdditionsToPrepend: Game[] = [];
+          for (const [opId, op] of Object.entries(persistentOps)) {
+            if (op.type === 'upsert' && op.game && !seenIds.has(opId)) {
+              seenIds.add(opId);
+              pendingAdditionsToPrepend.push(op.game);
+            }
+          }
+          for (const [pendingId, entry] of pendingLocalUpdates.entries()) {
+            if (entry.expiresAt > now && !seenIds.has(pendingId)) {
+              seenIds.add(pendingId);
+              pendingAdditionsToPrepend.push(entry.game);
+            } else if (entry.expiresAt <= now) {
+              pendingLocalUpdates.delete(pendingId);
+            }
+          }
+
+          const combinedCloud =
+            pendingAdditionsToPrepend.length > 0
+              ? [...pendingAdditionsToPrepend, ...cloudGames]
+              : cloudGames;
+
           // Merge cloud games with built-in codebase games to preserve defaults
-          const missing = this.getMissingFromCodebase(cloudGames);
-          const merged = missing.length > 0 ? [...cloudGames, ...missing] : cloudGames;
+          const missing = this.getMissingFromCodebase(combinedCloud);
+          const merged = missing.length > 0 ? [...combinedCloud, ...missing] : combinedCloud;
 
           // Prevent race condition: do not overwrite local state with fewer items during active batch upload
           if (isBatchWritingGames) {
@@ -612,6 +854,11 @@ export const StorageService = {
           cachedGames = merged;
           this.saveGames(merged);
           callback(merged);
+
+          // Automatically retry any pending queued operations
+          if (Object.keys(persistentOps).length > 0) {
+            void flushPendingGameOps();
+          }
 
           // Automatically push any newly added codebase games to Firestore once per session
           const toPush = missing.filter((g) => !syncedCodebaseIds.has(g.id));
@@ -629,7 +876,9 @@ export const StorageService = {
         } else {
           // If Firestore is empty on first boot, seed it with ALL_INITIAL_GAMES
           ALL_INITIAL_GAMES.forEach((g) => {
-            setDoc(doc(db, 'games', sanitizeFirestoreId(g.id)), prepareGameForFirestore(g)).catch(() => {});
+            try {
+              setDoc(doc(db, 'games', sanitizeFirestoreId(g.id)), prepareGameForFirestore(g)).catch(() => {});
+            } catch {}
           });
         }
       },
@@ -655,17 +904,12 @@ export const StorageService = {
       createdAt: game.createdAt || new Date().toISOString(),
     };
 
+    const opTimestamp = recordPendingUpsert(newGame);
     const updated = [newGame, ...games];
     this.saveGames(updated);
 
-    // Instant Cloud Firestore write: Chrome -> Cloud -> Firefox sync
-    try {
-      setDoc(doc(db, 'games', newGame.id), prepareGameForFirestore(newGame)).catch((err) => {
-        console.warn('Firestore addGame sync warning:', err);
-      });
-    } catch (err) {
-      console.warn('Firestore addGame failed:', err);
-    }
+    // Instant Cloud Firestore write with durable tracking & error surfacing
+    void syncSingleGameUpsertToFirestore(newGame, opTimestamp);
 
     return newGame;
   },
@@ -686,24 +930,56 @@ export const StorageService = {
       };
     });
 
+    const timestampsById = new Map<string, number>();
+    created.forEach((g) => {
+      timestampsById.set(g.id, recordPendingUpsert(g));
+    });
+
     const updated = [...created, ...games];
     this.saveGames(updated);
 
-    // Atomic Batch Cloud Firestore write to prevent partial dropped writes
+    // Atomic Batch Cloud Firestore write with per-item fallback so 1 bad item never drops the rest
     isBatchWritingGames = true;
     (async () => {
       try {
-        const batchItems = created.map((g) => ({
-          id: g.id,
-          data: prepareGameForFirestore(g),
-        }));
-        await atomicBatchSet('games', batchItems);
-      } catch (err) {
-        console.warn('Firestore addMultipleGames atomic batch failed:', err);
+        const batchItems: Array<{ id: string; data: Record<string, any> }> = [];
+        const failedPrecheck: Array<{ game: Game; err: unknown }> = [];
+        for (const g of created) {
+          try {
+            batchItems.push({ id: g.id, data: prepareGameForFirestore(g) });
+          } catch (err) {
+            failedPrecheck.push({ game: g, err });
+          }
+        }
+
+        if (failedPrecheck.length > 0) {
+          for (const { game, err } of failedPrecheck) {
+            const ts = timestampsById.get(game.id) || now;
+            resolvePendingOp(game.id, ts);
+            pendingLocalUpdates.delete(game.id);
+            emitSyncError(`Sync failed for "${game.name}": ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+
+        if (batchItems.length > 0) {
+          try {
+            await atomicBatchSet('games', batchItems);
+            batchItems.forEach(({ id }) => {
+              resolvePendingOp(id, timestampsById.get(id) || now);
+            });
+          } catch (batchErr) {
+            console.warn('Batch write failed, falling back to per-item sync:', batchErr);
+            for (const item of created) {
+              if (!failedPrecheck.some((f) => f.game.id === item.id)) {
+                await syncSingleGameUpsertToFirestore(item, timestampsById.get(item.id) || now);
+              }
+            }
+          }
+        }
       } finally {
         setTimeout(() => {
           isBatchWritingGames = false;
-        }, 800);
+        }, 1200);
       }
     })();
 
@@ -718,19 +994,10 @@ export const StorageService = {
 
     if (index !== -1) {
       games[index] = nextGame;
-      pendingLocalUpdates.set(normalizedId, {
-        game: nextGame,
-        expiresAt: Date.now() + 10000,
-      });
+      const opTimestamp = recordPendingUpsert(nextGame);
       this.saveGames(games);
 
-      try {
-        setDoc(doc(db, 'games', normalizedId), prepareGameForFirestore(nextGame)).catch((err) => {
-          console.warn('Firestore updateGame sync warning:', err);
-        });
-      } catch (err) {
-        console.warn('Firestore updateGame failed:', err);
-      }
+      void syncSingleGameUpsertToFirestore(nextGame, opTimestamp);
     }
   },
 
@@ -749,14 +1016,11 @@ export const StorageService = {
       }
     }
 
+    const opTimestamp = recordPendingDelete(id);
     const filtered = games.filter(g => g.id !== id);
     this.saveGames(filtered);
 
-    try {
-      deleteDoc(doc(db, 'games', id)).catch(() => {});
-    } catch (err) {
-      console.warn('Firestore deleteGame failed:', err);
-    }
+    void syncSingleGameDeleteToFirestore(id, opTimestamp);
   },
 
   deleteMultipleGames(ids: string[]): void {
@@ -784,23 +1048,22 @@ export const StorageService = {
       this.saveSteamOnlineSyncConfig({ ...cfg, deletedAppIds: nextDeleted });
     }
 
+    const opTimestamps = ids.map((id) => ({ id, ts: recordPendingDelete(id) }));
     const filtered = games.filter(g => !idSet.has(g.id));
     this.saveGames(filtered);
 
-    try {
-      ids.forEach((id) => {
-        deleteDoc(doc(db, 'games', id)).catch(() => {});
-      });
-    } catch (err) {
-      console.warn('Firestore deleteMultipleGames failed:', err);
-    }
+    (async () => {
+      for (const { id, ts } of opTimestamps) {
+        await syncSingleGameDeleteToFirestore(id, ts);
+      }
+    })();
   },
 
   resetToDefault(): Game[] {
     this.saveGames(ALL_INITIAL_GAMES);
     try {
       ALL_INITIAL_GAMES.forEach((g) => {
-        setDoc(doc(db, 'games', g.id), cleanFirestoreDoc(g)).catch(() => {});
+        setDoc(doc(db, 'games', sanitizeFirestoreId(g.id)), prepareGameForFirestore(g)).catch(() => {});
       });
     } catch (err) {
       console.warn('Firestore resetToDefault failed:', err);
@@ -859,9 +1122,18 @@ export const StorageService = {
     try {
       localStorage.setItem(STORAGE_KEY_SETTINGS, JSON.stringify(settings));
       idbSet(STORAGE_KEY_SETTINGS, settings).catch(() => {});
+      const cleaned = cleanFirestoreDoc(settings);
+      const bytes = getUtf8ByteLength(JSON.stringify(cleaned));
+      if (bytes > 990_000) {
+        emitSyncError('Settings/Cover images exceed 1MB cloud limit. Please use smaller images or Video/Image URLs.');
+        return;
+      }
       // Cloud Firestore sync
-      setDoc(doc(db, 'settings', 'general'), cleanFirestoreDoc(settings)).catch((err) => {
+      setDoc(doc(db, 'settings', 'general'), cleaned).catch((err) => {
         console.warn('Firestore saveSettings warning:', err);
+        if (isPermanentFirestoreWriteError(err)) {
+          emitSyncError(`Failed to sync settings to cloud: ${err instanceof Error ? err.message : String(err)}`);
+        }
       });
     } catch (e) {
       console.error('Failed to save settings', e);
@@ -2286,11 +2558,20 @@ export const StorageService = {
                     g.name.trim().toLowerCase() === normName))
               );
             });
-            if (existingMatch && existingMatch.steamPriceUsd !== item.steamPriceUsd) {
+            const nextGenre =
+              item.genre && item.genre !== 'Steam Game'
+                ? item.genre.trim().slice(0, 100)
+                : existingMatch?.genre;
+            if (
+              existingMatch &&
+              (existingMatch.steamPriceUsd !== item.steamPriceUsd ||
+                (nextGenre && existingMatch.genre !== nextGenre))
+            ) {
               this.updateGame({
                 ...existingMatch,
                 steamAppId: existingMatch.steamAppId || item.appId,
                 steamPriceUsd: item.steamPriceUsd,
+                genre: nextGenre || existingMatch.genre,
               });
             }
             feedGamesSummary.push({
@@ -2750,25 +3031,28 @@ export const StorageService = {
   // Merge Catalog between Google AI Studio & Netlify
   mergeCatalog(incomingGames: Game[]): Game[] {
     const existing = this.getGames();
-    const existingMap = new Map<string, Game>();
-    existing.forEach((g) => {
-      existingMap.set(g.id, g);
-      existingMap.set(g.name.toLowerCase().trim(), g);
-    });
+    const existingIds = new Set(existing.map((g) => g.id));
+    const existingKeys = new Set(existing.map((g) => getGameDedupeKey(g)));
 
     const newToAdd: Game[] = [];
     incomingGames.forEach((incoming) => {
-      const match =
-        existingMap.get(incoming.id) ||
-        existingMap.get(incoming.name.toLowerCase().trim());
-      if (!match) {
-        newToAdd.push(incoming);
+      if (!incoming || !incoming.name) return;
+      const key = getGameDedupeKey(incoming);
+      if (!existingIds.has(incoming.id) && !existingKeys.has(key)) {
+        existingIds.add(incoming.id);
+        existingKeys.add(key);
+        newToAdd.push({
+          ...incoming,
+          id: sanitizeFirestoreId(incoming.id),
+        });
       }
     });
 
-    const merged = [...newToAdd, ...existing];
-    this.saveGames(merged);
-    return merged;
+    if (newToAdd.length > 0) {
+      return this.addMultipleGames(newToAdd);
+    }
+
+    return existing;
   },
 
   // Export / Import

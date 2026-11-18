@@ -7,8 +7,9 @@ import { DailyFinancialReport } from './DailyFinancialReport';
 import { GameModal } from './GameModal';
 import { CoverMediaForm } from './CoverMediaModal';
 import { SteamOnlineCoverForm } from './SteamOnlineCoverModal';
-import { extractSteamAppId, fetchSteamSpec } from '../services/steamService';
-import { compressImageFile } from '../utils/imageUtils';
+import { PromoCoverTarget } from './SteamOnlineCover';
+import { extractSteamAppId, fetchSteamGenresBatch, fetchSteamSpec } from '../services/steamService';
+import { blobToCompressedDataUrl, compressDataUrl, compressImageFile } from '../utils/imageUtils';
 import { SteamOnlineSyncModal, SteamSyncModalState, SteamSyncFeedItem } from './SteamOnlineSyncModal';
 import { MissingSteamSpecsModal } from './MissingSteamSpecsModal';
 
@@ -33,6 +34,9 @@ interface AdminDashboardProps {
 }
 
 type AdminTab = 'games' | 'reports' | 'settings' | 'backup';
+type AdminCatalogViewMode = 'small' | 'medium' | 'large' | 'detail';
+
+const ADMIN_CATALOG_VIEW_KEY = 'kanigame_admin_catalog_view_mode';
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   games,
@@ -55,6 +59,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 }) => {
 
   const [activeTab, setActiveTab] = useState<AdminTab>('games');
+  const [catalogViewMode, setCatalogViewMode] = useState<AdminCatalogViewMode>(() => {
+    try {
+      const saved = localStorage.getItem(ADMIN_CATALOG_VIEW_KEY);
+      if (saved === 'small' || saved === 'medium' || saved === 'large' || saved === 'detail') {
+        return saved;
+      }
+    } catch {
+      // ignore storage errors
+    }
+    return 'detail';
+  });
+  const handleSetCatalogViewMode = (mode: AdminCatalogViewMode) => {
+    setCatalogViewMode(mode);
+    try {
+      localStorage.setItem(ADMIN_CATALOG_VIEW_KEY, mode);
+    } catch {
+      // ignore storage errors
+    }
+  };
   const [searchFilter, setSearchFilter] = useState('');
   const [tagFilter, setTagFilter] = useState<string>('all');
   const [specFilter, setSpecFilter] = useState<'all' | 'missing' | 'saved' | 'skipped'>('all');
@@ -90,6 +113,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     total: number;
     saved: number;
   } | null>(null);
+  const [genreSyncProgress, setGenreSyncProgress] = useState<{
+    done: number;
+    total: number;
+    updated: number;
+  } | null>(null);
+  const [adminPromoCoverTab, setAdminPromoCoverTab] = useState<PromoCoverTarget>('steam-online');
   const [steamOnlineSyncConfig, setSteamOnlineSyncConfig] = useState<SteamOnlineAutoSyncConfig>(() =>
     StorageService.getSteamOnlineSyncConfig()
   );
@@ -244,11 +273,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
     setIsUploadingQr(true);
     try {
-      const compressed = await compressImageFile(file, 640, 640, 0.9);
+      const compressed = await compressImageFile(file, 640, 640, 0.85, 180_000);
       setQrImage(compressed);
       onShowToast('QR Code image loaded successfully!');
-    } catch {
-      onShowToast('Failed to load QR code image file', 'error');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to load QR code image file';
+      onShowToast(msg, 'error');
     } finally {
       setIsUploadingQr(false);
     }
@@ -466,25 +496,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         return;
       }
       try {
-        const compressed = await compressImageFile(file, 640, 850, 0.82);
+        const compressed = await compressImageFile(file, 640, 850, 0.82, 480_000);
         setFormImg(compressed);
         setPreviewError(false);
         onShowToast('Image compressed & loaded successfully!');
       } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Failed to compress image for cloud sync';
         console.error('Image compression error', err);
-        const reader = new FileReader();
-        reader.onload = (event) => {
-          const base64 = event.target?.result as string;
-          setFormImg(base64);
-          setPreviewError(false);
-          onShowToast('Image loaded successfully!');
-        };
-        reader.readAsDataURL(file);
+        onShowToast(msg, 'error');
       }
     }
   };
 
-  const handleSubmitSingleGame = (e: React.FormEvent) => {
+  const handleSubmitSingleGame = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim()) {
       onShowToast('Please enter game name', 'error');
@@ -493,6 +517,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     if (!formImg.trim()) {
       onShowToast('Please provide an image URL or upload an image file', 'error');
       return;
+    }
+
+    let safeImg = formImg.trim();
+    if (safeImg.startsWith('data:image/') && safeImg.length > 480_000) {
+      try {
+        safeImg = await compressDataUrl(safeImg, 640, 850, 0.8, 480_000);
+        setFormImg(safeImg);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : 'Image exceeds maximum cloud sync size';
+        onShowToast(msg, 'error');
+        return;
+      }
     }
 
     const parsedSteamPrice =
@@ -510,7 +546,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         name: formName.trim(),
         tag: formTag.trim(),
         genre: formGenre.trim(),
-        img: formImg.trim(),
+        img: safeImg,
         link: formLink.trim() || undefined,
         description: formDesc.trim() || undefined,
         steamSpec: formSkipSteamLink ? undefined : editSteamSpec,
@@ -526,7 +562,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         name: formName.trim(),
         tag: formTag.trim(),
         genre: formGenre.trim(),
-        img: formImg.trim(),
+        img: safeImg,
         link: formLink.trim() || undefined,
         description: formDesc.trim() || undefined,
         steamSpec: formSkipSteamLink ? undefined : editSteamSpec,
@@ -573,6 +609,77 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setSelectedGameIds([]);
     setShowBatchDeleteConfirm(false);
     onShowToast(`Successfully deleted ${count} games from catalog.`);
+  };
+
+  const handleSyncAllGameGenres = async () => {
+    if (genreSyncProgress) return;
+    const targets = games.filter(
+      (g) => !g.tag.toLowerCase().includes('product') && !g.skipSteamLink
+    );
+    if (targets.length === 0) {
+      onShowToast('No Steam-linked games found to sync game types.', 'info');
+      return;
+    }
+
+    let done = 0;
+    let updated = 0;
+    const total = targets.length;
+    setGenreSyncProgress({ done: 0, total, updated: 0 });
+
+    try {
+      const batchSize = 40;
+      for (let i = 0; i < targets.length; i += batchSize) {
+        const chunk = targets.slice(i, i + batchSize);
+        const resolvedMap = await fetchSteamGenresBatch(
+          chunk.map((g) => ({
+            id: g.id,
+            name: g.name,
+            link: g.link,
+            steamAppId: g.steamAppId || g.steamSpec?.appId,
+          }))
+        );
+
+        const latestById = new Map(StorageService.getGames().map((g) => [g.id, g]));
+        for (const item of chunk) {
+          const hit = resolvedMap[item.id];
+          done++;
+          if (hit && hit.genre && hit.genre !== 'Steam Game') {
+            const latest = latestById.get(item.id) || item;
+            const needsGenreChange = latest.genre !== hit.genre;
+            const needsAppId = !latest.steamAppId && Boolean(hit.appId);
+            const needsLink = !latest.link && Boolean(hit.steamUrl);
+            const needsSpecGenre =
+              Boolean(latest.steamSpec) && latest.steamSpec?.primaryGenre !== hit.genre;
+
+            if (needsGenreChange || needsAppId || needsLink || needsSpecGenre) {
+              onUpdateGame({
+                ...latest,
+                genre: hit.genre,
+                steamAppId: latest.steamAppId || hit.appId,
+                link: latest.link || hit.steamUrl,
+                steamSpec: latest.steamSpec
+                  ? { ...latest.steamSpec, primaryGenre: hit.genre }
+                  : undefined,
+              });
+              if (needsGenreChange) updated++;
+            }
+          }
+        }
+        setGenreSyncProgress({ done, total, updated });
+      }
+
+      onShowToast(
+        updated > 0
+          ? `Updated game types (genre) for ${updated} of ${total} games from Steam!`
+          : `All ${total} games already have accurate Steam game types.`,
+        'success'
+      );
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Failed to sync game types from Steam.';
+      onShowToast(msg, 'error');
+    } finally {
+      setGenreSyncProgress(null);
+    }
   };
 
   // Save Settings
@@ -1072,6 +1179,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
                 <button
                   type="button"
+                  disabled={genreSyncProgress !== null}
+                  onClick={() => void handleSyncAllGameGenres()}
+                  className="px-3.5 py-2 rounded-xl font-semibold text-xs flex items-center gap-2 transition cursor-pointer whitespace-nowrap border bg-purple-950/75 hover:bg-purple-900/80 disabled:opacity-60 text-purple-200 border-purple-500/45"
+                  title="Re-sync accurate game types (genres) from Steam for both old and new games"
+                >
+                  <i
+                    className={`fa-solid ${
+                      genreSyncProgress ? 'fa-spinner fa-spin' : 'fa-tags'
+                    } text-purple-300`}
+                  ></i>
+                  <span>
+                    {genreSyncProgress
+                      ? `Types ${genreSyncProgress.done}/${genreSyncProgress.total} (${genreSyncProgress.updated} fixed)...`
+                      : 'Sync Game Types'}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setShowSteamOnlinePanel((v) => !v)}
                   className={`px-3.5 py-2 rounded-xl font-semibold text-xs flex items-center gap-2 transition cursor-pointer whitespace-nowrap border ${
                     showSteamOnlinePanel
@@ -1374,9 +1500,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             )}
 
-            {/* Quick Summary Pill Bar */}
-            <div className="flex flex-wrap items-center justify-between text-xs text-gray-400 px-1 gap-2">
-              <div className="flex items-center gap-2">
+            {/* Quick Summary & View Mode Bar */}
+            <div className="flex flex-wrap items-center justify-between text-xs text-gray-400 px-1 gap-3">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span>
                   Showing <span className="text-purple-400 font-bold">{filteredGames.length}</span> of {games.length} games
                 </span>
@@ -1386,194 +1512,458 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </span>
                 )}
               </div>
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={toggleSelectAllVisible}
-                  className="text-xs text-purple-400 hover:text-purple-300 underline font-medium cursor-pointer"
+
+              <div className="flex items-center gap-3 flex-wrap">
+                {/* View Size Switcher: Small / Medium / Large / Detail */}
+                <div
+                  className="inline-flex items-center gap-1 bg-[#0f172a] p-1 rounded-xl border border-purple-900/50"
+                  role="group"
+                  aria-label="Catalog View Mode"
                 >
-                  {selectedGameIds.length === filteredGames.length && filteredGames.length > 0
-                    ? 'Deselect All'
-                    : 'Select All Visible'}
-                </button>
-                {selectedGameIds.length > 0 && (
+                  <span className="text-[10px] uppercase tracking-wider font-mono text-gray-500 px-1.5 hidden sm:inline">
+                    View:
+                  </span>
+                  {(
+                    [
+                      { id: 'small', label: 'Small', icon: 'fa-grip' },
+                      { id: 'medium', label: 'Medium', icon: 'fa-table-cells' },
+                      { id: 'large', label: 'Large', icon: 'fa-table-cells-large' },
+                      { id: 'detail', label: 'Detail', icon: 'fa-list' },
+                    ] as const
+                  ).map((mode) => {
+                    const isActive = catalogViewMode === mode.id;
+                    return (
+                      <button
+                        key={mode.id}
+                        type="button"
+                        onClick={() => handleSetCatalogViewMode(mode.id)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-rajdhani font-bold flex items-center gap-1.5 transition cursor-pointer ${
+                          isActive
+                            ? 'bg-purple-600 text-white shadow-sm ring-1 ring-purple-400/60'
+                            : 'text-gray-400 hover:text-white hover:bg-[#131b2e]'
+                        }`}
+                        title={`${mode.label} View`}
+                      >
+                        <i className={`fa-solid ${mode.icon} text-[10px]`}></i>
+                        <span>{mode.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="flex items-center gap-3">
                   <button
                     type="button"
-                    onClick={() => setSelectedGameIds([])}
-                    className="text-xs text-red-400 hover:text-red-300 underline font-medium cursor-pointer"
+                    onClick={toggleSelectAllVisible}
+                    className="text-xs text-purple-400 hover:text-purple-300 underline font-medium cursor-pointer"
                   >
-                    Clear Selection
+                    {selectedGameIds.length === filteredGames.length && filteredGames.length > 0
+                      ? 'Deselect All'
+                      : 'Select All Visible'}
                   </button>
-                )}
+                  {selectedGameIds.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setSelectedGameIds([])}
+                      className="text-xs text-red-400 hover:text-red-300 underline font-medium cursor-pointer"
+                    >
+                      Clear Selection
+                    </button>
+                  )}
+                </div>
               </div>
             </div>
 
-            {/* Games Table */}
-            <div className="bg-[#0f172a] rounded-xl border border-purple-900/40 overflow-hidden shadow-2xl">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-[#131b2e] text-gray-300 font-rajdhani uppercase tracking-wider border-b border-purple-900/40">
-                    <tr>
-                      <th className="p-3 w-10 text-center">
-                        <input
-                          type="checkbox"
-                          checked={
-                            selectedGameIds.length === filteredGames.length &&
-                            filteredGames.length > 0
-                          }
-                          onChange={toggleSelectAllVisible}
-                          className="rounded text-purple-600 focus:ring-purple-500"
-                        />
-                      </th>
-                      <th className="p-3 w-16">Cover</th>
-                      <th className="p-3">Title & Link</th>
-                      <th className="p-3">Category Tag</th>
-                      <th className="p-3">Genre</th>
-                      <th className="p-3 text-right">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-purple-950/40">
-                    {filteredGames.length === 0 ? (
+            {/* Games Catalog View: Detail Table OR Small / Medium / Large Grid */}
+            {catalogViewMode === 'detail' ? (
+              <div className="bg-[#0f172a] rounded-xl border border-purple-900/40 overflow-hidden shadow-2xl">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-[#131b2e] text-gray-300 font-rajdhani uppercase tracking-wider border-b border-purple-900/40">
                       <tr>
-                        <td colSpan={6} className="p-8 text-center text-gray-500">
-                          No games match your search criteria.
-                        </td>
+                        <th className="p-3 w-10 text-center">
+                          <input
+                            type="checkbox"
+                            checked={
+                              selectedGameIds.length === filteredGames.length &&
+                              filteredGames.length > 0
+                            }
+                            onChange={toggleSelectAllVisible}
+                            className="rounded text-purple-600 focus:ring-purple-500"
+                          />
+                        </th>
+                        <th className="p-3 w-16">Cover</th>
+                        <th className="p-3">Title & Link</th>
+                        <th className="p-3">Category Tag</th>
+                        <th className="p-3">Genre</th>
+                        <th className="p-3 text-right">Actions</th>
                       </tr>
-                    ) : (
-                      filteredGames.map((game) => {
-                        const isSteam = game.tag.toLowerCase().includes('steam');
-                        const isSelected = selectedGameIds.includes(game.id);
+                    </thead>
+                    <tbody className="divide-y divide-purple-950/40">
+                      {filteredGames.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-8 text-center text-gray-500">
+                            No games match your search criteria.
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredGames.map((game) => {
+                          const isSteam = game.tag.toLowerCase().includes('steam');
+                          const isSelected = selectedGameIds.includes(game.id);
 
-                        return (
-                          <tr
-                            key={game.id}
-                            onClick={() => toggleSelectGame(game.id)}
-                            className={`hover:bg-[#131b2e]/90 transition cursor-pointer select-none ${
-                              isSelected
-                                ? 'bg-purple-950/40 ring-1 ring-inset ring-purple-500/50'
-                                : ''
+                          return (
+                            <tr
+                              key={game.id}
+                              onClick={() => toggleSelectGame(game.id)}
+                              className={`hover:bg-[#131b2e]/90 transition cursor-pointer select-none ${
+                                isSelected
+                                  ? 'bg-purple-950/40 ring-1 ring-inset ring-purple-500/50'
+                                  : ''
+                              }`}
+                            >
+                              <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => toggleSelectGame(game.id)}
+                                  className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 cursor-pointer accent-purple-600"
+                                />
+                              </td>
+                              <td className="p-3">
+                                <img
+                                  src={game.img}
+                                  alt={game.name}
+                                  onError={(e) => {
+                                    (e.target as HTMLImageElement).src =
+                                      'https://placehold.co/100x140/131b2e/ffffff?text=Cover';
+                                  }}
+                                  className="w-10 h-14 object-cover rounded-md border border-purple-900/40"
+                                />
+                              </td>
+                              <td className="p-3 font-medium text-gray-100 max-w-xs">
+                                <div className="font-semibold text-sm hover:text-purple-300">
+                                  {game.name}
+                                </div>
+                                {game.description && game.description.trim() && (
+                                  <p
+                                    title={game.description}
+                                    className="text-[11px] text-amber-200/85 mt-0.5 line-clamp-1"
+                                  >
+                                    {game.description}
+                                  </p>
+                                )}
+                                {game.link ? (
+                                  <a
+                                    href={game.link}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    onClick={(e) => e.stopPropagation()}
+                                    className="text-[11px] text-cyan-400 hover:underline flex items-center gap-1 mt-0.5 truncate"
+                                  >
+                                    <i className="fa-solid fa-arrow-up-right-from-square text-[9px]"></i>
+                                    <span className="truncate">{game.link}</span>
+                                  </a>
+                                ) : game.skipSteamLink ? (
+                                  <span className="text-[10px] text-amber-300/80 inline-flex items-center gap-1 mt-0.5">
+                                    <i className="fa-solid fa-link-slash text-[9px]"></i>
+                                    <span>Not linked to Steam</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-gray-500">No store URL</span>
+                                )}
+                              </td>
+                              <td className="p-3">
+                                <span
+                                  className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded border ${
+                                    isSteam
+                                      ? 'bg-purple-950/80 text-purple-300 border-purple-500/30'
+                                      : 'bg-cyan-950/80 text-cyan-300 border-cyan-500/30'
+                                  }`}
+                                >
+                                  {game.tag}
+                                </span>
+                              </td>
+                              <td className="p-3 text-gray-300">{game.genre}</td>
+                              <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center justify-end gap-1.5">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSpecInspectGame(game);
+                                    }}
+                                    className={`p-1.5 rounded-lg border transition cursor-pointer ${
+                                      game.steamSpec
+                                        ? 'bg-cyan-950/60 hover:bg-cyan-900/70 text-cyan-300 border-cyan-600/40'
+                                        : !game.tag.toLowerCase().includes('product') && !game.skipSteamLink
+                                        ? 'bg-amber-950/50 hover:bg-amber-900/70 text-amber-300 border-amber-500/50'
+                                        : 'bg-slate-900/60 hover:bg-slate-800 text-gray-400 border-slate-700'
+                                    }`}
+                                    title={
+                                      game.steamSpec
+                                        ? 'View PC System Requirements (Steam Spec Saved)'
+                                        : !game.tag.toLowerCase().includes('product') && !game.skipSteamLink
+                                        ? 'Missing Steam Spec — click to fetch & save'
+                                        : 'View PC System Requirements'
+                                    }
+                                  >
+                                    <i className="fa-solid fa-microchip"></i>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleStartEdit(game);
+                                    }}
+                                    className="p-1.5 bg-purple-900/40 hover:bg-purple-800/60 text-purple-300 rounded-lg border border-purple-700/40 transition cursor-pointer"
+                                    title="Edit Game"
+                                  >
+                                    <i className="fa-solid fa-pen-to-square"></i>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setDeletingId(game.id);
+                                    }}
+                                    className="p-1.5 bg-red-950/40 hover:bg-red-900/60 text-red-400 rounded-lg border border-red-800/40 transition cursor-pointer"
+                                    title="Delete Game"
+                                  >
+                                    <i className="fa-solid fa-trash-can"></i>
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : filteredGames.length === 0 ? (
+              <div className="bg-[#0f172a] rounded-xl border border-purple-900/40 p-10 text-center text-xs text-gray-500 shadow-2xl">
+                No games match your search criteria.
+              </div>
+            ) : (
+              <div
+                className={
+                  catalogViewMode === 'small'
+                    ? 'grid grid-cols-3 sm:grid-cols-5 md:grid-cols-7 lg:grid-cols-9 xl:grid-cols-11 2xl:grid-cols-13 gap-2.5'
+                    : catalogViewMode === 'medium'
+                    ? 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-3.5'
+                    : 'grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-5'
+                }
+              >
+                {filteredGames.map((game) => {
+                  const isSteam = game.tag.toLowerCase().includes('steam');
+                  const isProduct = game.tag.toLowerCase().includes('product');
+                  const isSelected = selectedGameIds.includes(game.id);
+                  const isSmall = catalogViewMode === 'small';
+                  const isLarge = catalogViewMode === 'large';
+
+                  return (
+                    <div
+                      key={game.id}
+                      onClick={() => toggleSelectGame(game.id)}
+                      className={`group relative bg-[#0f172a] rounded-xl border overflow-hidden transition cursor-pointer select-none flex flex-col justify-between shadow-lg ${
+                        isSelected
+                          ? 'border-purple-400 ring-2 ring-purple-500/60 bg-purple-950/30'
+                          : 'border-purple-900/40 hover:border-purple-500/60 hover:bg-[#131b2e]'
+                      }`}
+                    >
+                      {/* Cover Art + Floating Checkbox & Status */}
+                      <div className="relative aspect-[3/4] w-full bg-[#0a0f1d] overflow-hidden">
+                        <img
+                          src={game.img}
+                          alt={game.name}
+                          loading="lazy"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src =
+                              'https://placehold.co/300x400/131b2e/ffffff?text=Cover';
+                          }}
+                          className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-[#080b11]/90 via-transparent to-black/45 pointer-events-none" />
+
+                        {/* Selection Checkbox */}
+                        <div
+                          className={`absolute ${isSmall ? 'top-1.5 left-1.5' : 'top-2 left-2'} z-10`}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => toggleSelectGame(game.id)}
+                            className={`${
+                              isSmall ? 'w-3.5 h-3.5' : 'w-4 h-4'
+                            } rounded text-purple-600 focus:ring-purple-500 cursor-pointer accent-purple-600 shadow`}
+                          />
+                        </div>
+
+                        {/* Price Badge */}
+                        {game.price !== undefined && (
+                          <span
+                            className={`absolute ${
+                              isSmall
+                                ? 'top-1.5 right-1.5 text-[9px] px-1.5 py-0.5'
+                                : 'top-2 right-2 text-[11px] px-2 py-0.5'
+                            } rounded-md bg-emerald-950/90 text-emerald-300 border border-emerald-500/40 font-mono font-bold`}
+                          >
+                            ${game.price.toFixed(2)}
+                          </span>
+                        )}
+
+                        {/* Category Tag on Cover Bottom */}
+                        {!isSmall && (
+                          <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between gap-1 pointer-events-none">
+                            <span
+                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded border truncate ${
+                                isSteam
+                                  ? 'bg-purple-950/90 text-purple-200 border-purple-500/40'
+                                  : 'bg-cyan-950/90 text-cyan-200 border-cyan-500/40'
+                              }`}
+                            >
+                              {game.tag}
+                            </span>
+                            {!isProduct && (
+                              <span
+                                className={`text-[9px] font-mono px-1.5 py-0.5 rounded border shrink-0 ${
+                                  game.steamSpec
+                                    ? 'bg-cyan-950/90 text-cyan-300 border-cyan-500/40'
+                                    : game.skipSteamLink
+                                    ? 'bg-slate-900/90 text-gray-400 border-slate-600/50'
+                                    : 'bg-amber-950/90 text-amber-300 border-amber-500/40'
+                                }`}
+                              >
+                                {game.steamSpec ? 'Spec OK' : game.skipSteamLink ? 'No Link' : 'No Spec'}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Card Body & Quick Actions */}
+                      <div className={isSmall ? 'p-1.5 space-y-1.5' : isLarge ? 'p-3.5 space-y-2.5 flex-1 flex flex-col justify-between' : 'p-2.5 space-y-2 flex-1 flex flex-col justify-between'}>
+                        <div className="space-y-1">
+                          <h4
+                            title={game.name}
+                            className={`font-semibold text-gray-100 group-hover:text-purple-300 transition ${
+                              isSmall
+                                ? 'text-[11px] leading-tight line-clamp-1'
+                                : isLarge
+                                ? 'text-sm leading-snug line-clamp-2'
+                                : 'text-xs leading-snug line-clamp-2'
                             }`}
                           >
-                            <td className="p-3 text-center" onClick={(e) => e.stopPropagation()}>
-                              <input
-                                type="checkbox"
-                                checked={isSelected}
-                                onChange={() => toggleSelectGame(game.id)}
-                                className="w-4 h-4 rounded text-purple-600 focus:ring-purple-500 cursor-pointer accent-purple-600"
-                              />
-                            </td>
-                            <td className="p-3">
-                              <img
-                                src={game.img}
-                                alt={game.name}
-                                onError={(e) => {
-                                  (e.target as HTMLImageElement).src =
-                                    'https://placehold.co/100x140/131b2e/ffffff?text=Cover';
-                                }}
-                                className="w-10 h-14 object-cover rounded-md border border-purple-900/40"
-                              />
-                            </td>
-                            <td className="p-3 font-medium text-gray-100 max-w-xs">
-                              <div className="font-semibold text-sm hover:text-purple-300">
-                                {game.name}
-                              </div>
-                              {game.description && game.description.trim() && (
-                                <p
-                                  title={game.description}
-                                  className="text-[11px] text-amber-200/85 mt-0.5 line-clamp-1"
-                                >
-                                  {game.description}
-                                </p>
-                              )}
+                            {game.name}
+                          </h4>
+
+                          {!isSmall && (
+                            <div className="text-[11px] text-gray-400 truncate">
+                              {game.genre}
+                            </div>
+                          )}
+
+                          {isLarge && game.description && game.description.trim() && (
+                            <p
+                              title={game.description}
+                              className="text-[11px] text-amber-200/85 line-clamp-2 leading-relaxed"
+                            >
+                              {game.description}
+                            </p>
+                          )}
+
+                          {isLarge && (
+                            <div>
                               {game.link ? (
                                 <a
                                   href={game.link}
                                   target="_blank"
                                   rel="noopener noreferrer"
                                   onClick={(e) => e.stopPropagation()}
-                                  className="text-[11px] text-cyan-400 hover:underline flex items-center gap-1 mt-0.5 truncate"
+                                  className="text-[11px] text-cyan-400 hover:underline inline-flex items-center gap-1 max-w-full truncate"
                                 >
-                                  <i className="fa-solid fa-arrow-up-right-from-square text-[9px]"></i>
+                                  <i className="fa-solid fa-arrow-up-right-from-square text-[9px] shrink-0"></i>
                                   <span className="truncate">{game.link}</span>
                                 </a>
                               ) : game.skipSteamLink ? (
-                                <span className="text-[10px] text-amber-300/80 inline-flex items-center gap-1 mt-0.5">
+                                <span className="text-[10px] text-amber-300/80 inline-flex items-center gap-1">
                                   <i className="fa-solid fa-link-slash text-[9px]"></i>
                                   <span>Not linked to Steam</span>
                                 </span>
                               ) : (
                                 <span className="text-[10px] text-gray-500">No store URL</span>
                               )}
-                            </td>
-                            <td className="p-3">
-                              <span
-                                className={`inline-block text-[10px] font-bold px-2 py-0.5 rounded border ${
-                                  isSteam
-                                    ? 'bg-purple-950/80 text-purple-300 border-purple-500/30'
-                                    : 'bg-cyan-950/80 text-cyan-300 border-cyan-500/30'
-                                }`}
-                              >
-                                {game.tag}
-                              </span>
-                            </td>
-                            <td className="p-3 text-gray-300">{game.genre}</td>
-                            <td className="p-3 text-right" onClick={(e) => e.stopPropagation()}>
-                              <div className="flex items-center justify-end gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setSpecInspectGame(game);
-                                  }}
-                                  className={`p-1.5 rounded-lg border transition cursor-pointer ${
-                                    game.steamSpec
-                                      ? 'bg-cyan-950/60 hover:bg-cyan-900/70 text-cyan-300 border-cyan-600/40'
-                                      : !game.tag.toLowerCase().includes('product') && !game.skipSteamLink
-                                      ? 'bg-amber-950/50 hover:bg-amber-900/70 text-amber-300 border-amber-500/50'
-                                      : 'bg-slate-900/60 hover:bg-slate-800 text-gray-400 border-slate-700'
-                                  }`}
-                                  title={
-                                    game.steamSpec
-                                      ? 'View PC System Requirements (Steam Spec Saved)'
-                                      : !game.tag.toLowerCase().includes('product') && !game.skipSteamLink
-                                      ? 'Missing Steam Spec — click to fetch & save'
-                                      : 'View PC System Requirements'
-                                  }
-                                >
-                                  <i className="fa-solid fa-microchip"></i>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    handleStartEdit(game);
-                                  }}
-                                  className="p-1.5 bg-purple-900/40 hover:bg-purple-800/60 text-purple-300 rounded-lg border border-purple-700/40 transition cursor-pointer"
-                                  title="Edit Game"
-                                >
-                                  <i className="fa-solid fa-pen-to-square"></i>
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setDeletingId(game.id);
-                                  }}
-                                  className="p-1.5 bg-red-950/40 hover:bg-red-900/60 text-red-400 rounded-lg border border-red-800/40 transition cursor-pointer"
-                                  title="Delete Game"
-                                >
-                                  <i className="fa-solid fa-trash-can"></i>
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Action Buttons */}
+                        <div
+                          className={`flex items-center justify-between gap-1 pt-1 border-t border-purple-950/60`}
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSpecInspectGame(game);
+                            }}
+                            className={`${
+                              isSmall ? 'p-1 text-[10px]' : isLarge ? 'px-2.5 py-1.5 text-xs flex-1 justify-center flex items-center gap-1' : 'p-1.5 text-xs flex-1 flex items-center justify-center'
+                            } rounded-lg border transition cursor-pointer ${
+                              game.steamSpec
+                                ? 'bg-cyan-950/60 hover:bg-cyan-900/70 text-cyan-300 border-cyan-600/40'
+                                : !isProduct && !game.skipSteamLink
+                                ? 'bg-amber-950/50 hover:bg-amber-900/70 text-amber-300 border-amber-500/50'
+                                : 'bg-slate-900/60 hover:bg-slate-800 text-gray-400 border-slate-700'
+                            }`}
+                            title={
+                              game.steamSpec
+                                ? 'View PC System Requirements (Steam Spec Saved)'
+                                : !isProduct && !game.skipSteamLink
+                                ? 'Missing Steam Spec — click to fetch & save'
+                                : 'View PC System Requirements'
+                            }
+                          >
+                            <i className="fa-solid fa-microchip"></i>
+                            {isLarge && <span>Specs</span>}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleStartEdit(game);
+                            }}
+                            className={`${
+                              isSmall ? 'p-1 text-[10px]' : isLarge ? 'px-2.5 py-1.5 text-xs flex-1 justify-center flex items-center gap-1' : 'p-1.5 text-xs flex-1 flex items-center justify-center'
+                            } bg-purple-900/40 hover:bg-purple-800/60 text-purple-300 rounded-lg border border-purple-700/40 transition cursor-pointer`}
+                            title="Edit Game"
+                          >
+                            <i className="fa-solid fa-pen-to-square"></i>
+                            {isLarge && <span>Edit</span>}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeletingId(game.id);
+                            }}
+                            className={`${
+                              isSmall ? 'p-1 text-[10px]' : isLarge ? 'px-2.5 py-1.5 text-xs justify-center flex items-center' : 'p-1.5 text-xs flex-1 flex items-center justify-center'
+                            } bg-red-950/40 hover:bg-red-900/60 text-red-400 rounded-lg border border-red-800/40 transition cursor-pointer`}
+                            title="Delete Game"
+                          >
+                            <i className="fa-solid fa-trash-can"></i>
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            </div>
+            )}
           </div>
         )}
 
@@ -1925,7 +2315,43 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       setFormImg(e.target.value);
                       setPreviewError(false);
                     }}
-                    placeholder="https://..."
+                    onPaste={async (e) => {
+                      const items = e.clipboardData?.items;
+                      if (items) {
+                        for (let i = 0; i < items.length; i++) {
+                          if (items[i].type.startsWith('image/')) {
+                            e.preventDefault();
+                            const blob = items[i].getAsFile();
+                            if (blob) {
+                              try {
+                                const compressed = await blobToCompressedDataUrl(blob, 640, 850, 0.82, 480_000);
+                                setFormImg(compressed);
+                                setPreviewError(false);
+                                onShowToast('Pasted clipboard image compressed & ready!', 'success');
+                              } catch (err) {
+                                const msg = err instanceof Error ? err.message : 'Failed to compress pasted image';
+                                onShowToast(msg, 'error');
+                              }
+                            }
+                            return;
+                          }
+                        }
+                      }
+                      const pastedText = e.clipboardData?.getData('text')?.trim();
+                      if (pastedText && pastedText.startsWith('data:image/') && pastedText.length > 480_000) {
+                        e.preventDefault();
+                        try {
+                          const compressed = await compressDataUrl(pastedText, 640, 850, 0.82, 480_000);
+                          setFormImg(compressed);
+                          setPreviewError(false);
+                          onShowToast('Pasted image compressed & ready!', 'success');
+                        } catch (err) {
+                          const msg = err instanceof Error ? err.message : 'Failed to compress pasted image';
+                          onShowToast(msg, 'error');
+                        }
+                      }
+                    }}
+                    placeholder="https://... or Ctrl+V paste image"
                     className="w-full bg-[#131b2e] text-xs text-gray-200 rounded-xl px-3 py-2 border border-purple-900/50 outline-none mb-2"
                   />
                   <div className="flex items-center gap-2">
@@ -1948,25 +2374,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       type="button"
                       onClick={async () => {
                         try {
+                          if (navigator.clipboard?.read) {
+                            const clipItems = await navigator.clipboard.read();
+                            for (const clipItem of clipItems) {
+                              const imageType = clipItem.types.find((t) => t.startsWith('image/'));
+                              if (imageType) {
+                                const blob = await clipItem.getType(imageType);
+                                const compressed = await blobToCompressedDataUrl(blob, 640, 850, 0.82, 480_000);
+                                setFormImg(compressed);
+                                setPreviewError(false);
+                                onShowToast('Clipboard image compressed & loaded!', 'success');
+                                return;
+                              }
+                            }
+                          }
                           if (navigator.clipboard?.readText) {
                             const text = await navigator.clipboard.readText();
                             if (text && text.trim()) {
-                              setFormImg(text.trim());
+                              const trimmed = text.trim();
+                              const finalImg =
+                                trimmed.startsWith('data:image/') && trimmed.length > 480_000
+                                  ? await compressDataUrl(trimmed, 640, 850, 0.82, 480_000)
+                                  : trimmed;
+                              setFormImg(finalImg);
                               setPreviewError(false);
                               onShowToast('Image URL pasted from clipboard!', 'success');
                               return;
                             }
                           }
-                        } catch {
-                          // fallback
+                        } catch (err) {
+                          if (err instanceof Error && err.message.includes('900KB')) {
+                            onShowToast(err.message, 'error');
+                            return;
+                          }
                         }
                         onShowToast('Please press Ctrl+V inside the URL box above', 'info');
                       }}
                       className="cursor-pointer px-3 py-1.5 rounded-lg bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-500/40 text-cyan-200 text-xs font-semibold flex items-center gap-1.5 transition"
-                      title="Paste image link from clipboard"
+                      title="Paste image or image link from clipboard"
                     >
                       <i className="fa-solid fa-paste text-cyan-400 text-xs"></i>
-                      <span>Paste URL</span>
+                      <span>Paste URL / Image</span>
                     </button>
                   </div>
                 </div>
@@ -2159,23 +2607,54 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               />
             </div>
 
-            {/* STEAM ONLINE CUSTOM COVER (PHOTO / VIDEO / TEXT & DISCOUNT STYLE) */}
+            {/* CATEGORY COVERS (STEAM ONLINE / PRODUCT / GAMEថែមEXTERNAL - PHOTO / VIDEO / TEXT) */}
             <div className="bg-[#0f172a] p-6 sm:p-8 rounded-2xl border border-sky-500/40 shadow-2xl">
-              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-800">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#0ea5e9]/30 to-[#ff5a00]/30 border border-sky-400/40 flex items-center justify-center text-sky-300">
-                  <i className="fa-brands fa-steam text-xl"></i>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-800">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#0ea5e9]/30 to-[#ff5a00]/30 border border-sky-400/40 flex items-center justify-center text-sky-300 shrink-0">
+                    <i className="fa-solid fa-layer-group text-xl"></i>
+                  </div>
+                  <div>
+                    <h3 className="font-orbitron font-bold text-lg text-white">
+                      CATEGORY COVERS (PHOTO / VIDEO / TEXT &amp; PROMO)
+                    </h3>
+                    <p className="text-xs text-gray-400">
+                      Set separate Cover Photos, Videos, Headlines &amp; Promo Ribbons for Steam Online, Product, and GameថែមExternal.
+                    </p>
+                  </div>
                 </div>
-                <div>
-                  <h3 className="font-orbitron font-bold text-lg text-white">
-                    STEAM ONLINE COVER (PHOTO / VIDEO / TEXT & DISCOUNT)
-                  </h3>
-                  <p className="text-xs text-gray-400">
-                    Add Photo or Video, custom Headline & Subtitle text, and the Discount style ribbon for Steam Online.
-                  </p>
+
+                {/* Target Category Switcher */}
+                <div className="flex flex-wrap items-center gap-1.5 bg-[#090e1a] p-1.5 rounded-xl border border-slate-800">
+                  {(
+                    [
+                      { id: 'steam-online', label: 'Steam Online', icon: 'fa-brands fa-steam' },
+                      { id: 'product', label: 'Product', icon: 'fa-solid fa-box-open' },
+                      { id: 'external', label: 'GameថែមExternal', icon: 'fa-solid fa-gift' },
+                    ] as const
+                  ).map((tab) => {
+                    const isActive = adminPromoCoverTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setAdminPromoCoverTab(tab.id)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-orbitron font-bold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
+                          isActive
+                            ? 'bg-gradient-to-r from-[#0ea5e9] to-[#0077e6] text-white shadow-md'
+                            : 'text-gray-400 hover:text-white hover:bg-slate-800/70'
+                        }`}
+                      >
+                        <i className={tab.icon}></i>
+                        <span>{tab.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
               <SteamOnlineCoverForm
+                target={adminPromoCoverTab}
                 settings={localSettings}
                 onSaveSettings={(updated) => {
                   setLocalSettings(updated);

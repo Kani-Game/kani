@@ -77,7 +77,7 @@ export const CoverMediaForm: React.FC<CoverMediaFormProps> = ({
 
     setIsUploading(target);
     try {
-      const compressed = await compressImageFile(file, 1400, 900, 0.85);
+      const compressed = await compressImageFile(file, 1280, 800, 0.82, 180_000);
       if (target === 'left') {
         setCoverImage(compressed);
       } else {
@@ -85,8 +85,9 @@ export const CoverMediaForm: React.FC<CoverMediaFormProps> = ({
       }
       setMediaType('photo');
       onShowToast?.('បានបញ្ចូលរូបភាព Cover រួចរាល់! សូមចុច Save Cover Media ដើម្បីរក្សាទុក');
-    } catch {
-      onShowToast?.('បរាជ័យក្នុងការបញ្ចូលរូបភាព', 'error');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'បរាជ័យក្នុងការបញ្ចូលរូបភាព';
+      onShowToast?.(msg, 'error');
     } finally {
       setIsUploading(null);
     }

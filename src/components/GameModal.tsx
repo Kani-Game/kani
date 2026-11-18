@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Game } from '../types/game';
 import {
   fetchSteamSpec,
@@ -6,6 +6,18 @@ import {
   SteamSpecResponse,
 } from '../services/steamService';
 import { computeSteamOnlinePricing } from '../utils/pricingUtils';
+import {
+  analyzePcCompatibilityWithAi,
+  comparePcWithGameSpec,
+  CPU_PRESETS,
+  getEmptyPcSpecs,
+  GPU_PRESETS,
+  loadSavedPcSpecs,
+  PcCompatibilityReport,
+  PcOsOption,
+  savePcSpecs,
+  UserPcSpecs,
+} from '../utils/pcSpecChecker';
 
 interface GameModalProps {
   game: Game | null;
@@ -131,6 +143,12 @@ export const GameModal: React.FC<GameModalProps> = ({
   const [steamSpec, setSteamSpec] = useState<SteamSpecResponse | null>(null);
   const [specLoading, setSpecLoading] = useState(false);
   const [specError, setSpecError] = useState<string | null>(null);
+  const [showPcChecker, setShowPcChecker] = useState(false);
+  const [aiReport, setAiReport] = useState<PcCompatibilityReport | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
+  const [userPcSpecs, setUserPcSpecs] = useState<UserPcSpecs>(() => loadSavedPcSpecs());
+  const pcCheckerRef = useRef<HTMLDivElement>(null);
 
   const isProduct = Boolean(game?.tag.toLowerCase().includes('product'));
   const isSteamOnline = Boolean(
@@ -171,12 +189,80 @@ export const GameModal: React.FC<GameModalProps> = ({
     setSteamSpec(null);
     setSpecError(null);
     setSpecLoading(false);
+    setShowPcChecker(false);
+    setAiReport(null);
+    setAiLoading(false);
+    setAiError(null);
 
     if (!game) return;
     if (!game.tag.toLowerCase().includes('product') && !game.skipSteamLink) {
       void loadSpecs(game, false);
     }
   }, [game, loadSpecs]);
+
+  const updateUserPcField = <K extends keyof UserPcSpecs>(key: K, value: UserPcSpecs[K]) => {
+    setAiReport(null);
+    setAiError(null);
+    setUserPcSpecs((prev) => {
+      const next: UserPcSpecs = {
+        ...prev,
+        [key]: value,
+      };
+      savePcSpecs(next);
+      return next;
+    });
+  };
+
+  const handleClearPcSpecs = () => {
+    const empty = getEmptyPcSpecs();
+    setUserPcSpecs(empty);
+    setAiReport(null);
+    setAiError(null);
+    savePcSpecs(empty);
+  };
+
+  const handleCheckWithAi = async () => {
+    if (!game || !steamSpec) return;
+    if (!userPcSpecs.cpu.trim() && !userPcSpecs.gpu.trim() && userPcSpecs.ramGb <= 0) {
+      setAiError('សូមវាយបញ្ចូល CPU, RAM ឬ GPU យ៉ាងតិច ១ មុនពេលឱ្យ Google AI វិភាគ។');
+      return;
+    }
+
+    setAiLoading(true);
+    setAiError(null);
+    try {
+      const report = await analyzePcCompatibilityWithAi(game.name, userPcSpecs, steamSpec);
+      setAiReport(report);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Unable to analyze specs with Google AI.';
+      setAiError(message);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  const handleOpenPcChecker = () => {
+    setShowPcChecker((prev) => {
+      const next = !prev;
+      if (next) {
+        if (!steamSpec && !specLoading && game) {
+          void loadSpecs(game, false);
+        }
+        window.setTimeout(() => {
+          pcCheckerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }, 80);
+      }
+      return next;
+    });
+  };
+
+  const localCompatibilityReport = useMemo(() => {
+    if (!showPcChecker || !steamSpec) return null;
+    return comparePcWithGameSpec(userPcSpecs, steamSpec);
+  }, [showPcChecker, steamSpec, userPcSpecs]);
+
+  const compatibilityReport = aiReport ?? localCompatibilityReport;
 
   if (!game) return null;
 
@@ -376,6 +462,22 @@ export const GameModal: React.FC<GameModalProps> = ({
                     <i className="fa-solid fa-arrow-up-right-from-square text-[10px]"></i>
                   </a>
                 )}
+
+                {!isProduct && (
+                  <button
+                    type="button"
+                    onClick={handleOpenPcChecker}
+                    className={`py-2 px-3.5 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap border ${
+                      showPcChecker
+                        ? 'bg-gradient-to-r from-emerald-500 to-cyan-500 text-white border-emerald-300 shadow-lg shadow-emerald-950/50'
+                        : 'bg-emerald-950/75 hover:bg-emerald-900/90 text-emerald-200 hover:text-white border-emerald-500/45'
+                    }`}
+                    title="ផ្ទៀងផ្ទាត់ Spec កុំព្យូទ័ររបស់អ្នកជាមួយ Spec ហ្គេមនេះ"
+                  >
+                    <i className="fa-solid fa-desktop text-[11px]"></i>
+                    <span>Check My PC</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>
@@ -474,6 +576,310 @@ export const GameModal: React.FC<GameModalProps> = ({
                 >
                   Try Again
                 </button>
+              </div>
+            )}
+
+            {/* PC Compatibility Checker Panel */}
+            {showPcChecker && (
+              <div
+                ref={pcCheckerRef}
+                className="rounded-2xl border border-emerald-500/40 bg-[#0d1629] p-4 sm:p-5 space-y-4 shadow-xl"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-white/10">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-lg bg-emerald-950/90 border border-emerald-500/40 text-emerald-300 flex items-center justify-center">
+                      <i className="fa-solid fa-desktop text-sm"></i>
+                    </div>
+                    <div>
+                      <h5 className="font-orbitron font-bold text-xs sm:text-sm text-white uppercase tracking-wider">
+                        PC Compatibility Check (ផ្ទៀងផ្ទាត់ Spec PC)
+                      </h5>
+                      <p className="text-[11px] text-gray-400">
+                        វាយបញ្ចូល Spec កុំព្យូទ័ររបស់អ្នកខាងក្រោម ដើម្បីផ្ទៀងផ្ទាត់ជាមួយ Minimum &amp; Recommended របស់ហ្គេម
+                      </p>
+                    </div>
+                  </div>
+
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        disabled={aiLoading || specLoading || !steamSpec}
+                        onClick={() => void handleCheckWithAi()}
+                        className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-indigo-600 via-purple-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 disabled:opacity-50 text-white border border-cyan-300/40 text-[11px] font-bold inline-flex items-center gap-1.5 transition cursor-pointer shadow-md shadow-indigo-950/60"
+                        title="ប្រើ Google AI វិភាគ Spec កុំព្យូទ័ររបស់អ្នកឱ្យបានច្បាស់ 100%"
+                      >
+                        <i
+                          className={`fa-solid ${
+                            aiLoading ? 'fa-spinner fa-spin' : 'fa-wand-magic-sparkles'
+                          } text-[10px]`}
+                        ></i>
+                        <span>{aiLoading ? 'Google AI កំពុងវិភាគ...' : 'Check with Google AI'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleClearPcSpecs}
+                        className="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-gray-300 hover:text-white border border-slate-600 text-[11px] font-semibold inline-flex items-center gap-1.5 transition cursor-pointer"
+                        title="សម្អាត Spec ដែលបានវាយ"
+                      >
+                        <i className="fa-solid fa-eraser text-[10px]"></i>
+                        <span>Clear</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Direct Manual Input Boxes */}
+                  <div className="rounded-xl bg-[#090f1d] border border-slate-800 p-3.5 text-xs space-y-2.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5">
+                      <div>
+                        <label className="block text-[10px] text-gray-400 uppercase mb-1">
+                          OS (ប្រព័ន្ធ)
+                        </label>
+                        <select
+                          value={userPcSpecs.os}
+                          onChange={(e) => updateUserPcField('os', e.target.value as PcOsOption)}
+                          className="w-full bg-[#131b2e] text-gray-100 text-xs rounded-lg px-2.5 py-2 border border-slate-700 outline-none focus:border-cyan-400"
+                        >
+                          <option value="Windows 11 64-bit">Windows 11 64-bit</option>
+                          <option value="Windows 10 64-bit">Windows 10 64-bit</option>
+                          <option value="Windows 7/8 64-bit">Windows 7/8 64-bit</option>
+                          <option value="macOS">macOS</option>
+                          <option value="Linux">Linux</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] text-gray-400 uppercase mb-1">
+                          CPU (ស៊ីភីយូ)
+                        </label>
+                        <input
+                          type="text"
+                          list="kani-cpu-presets"
+                          value={userPcSpecs.cpu}
+                          onChange={(e) => updateUserPcField('cpu', e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              void handleCheckWithAi();
+                            }
+                          }}
+                          placeholder="ឧ. Core i5-12400F"
+                          className="w-full bg-[#131b2e] text-gray-100 text-xs rounded-lg px-2.5 py-2 border border-slate-700 outline-none focus:border-cyan-400"
+                        />
+                        <datalist id="kani-cpu-presets">
+                          {CPU_PRESETS.map((cpu) => (
+                            <option key={cpu} value={cpu} />
+                          ))}
+                        </datalist>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] text-gray-400 uppercase mb-1">
+                          RAM (GB)
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={512}
+                          value={userPcSpecs.ramGb > 0 ? userPcSpecs.ramGb : ''}
+                          onChange={(e) => {
+                            const parsed = parseInt(e.target.value, 10);
+                            updateUserPcField(
+                              'ramGb',
+                              Number.isFinite(parsed) && parsed > 0 ? parsed : 0
+                            );
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              void handleCheckWithAi();
+                            }
+                          }}
+                          placeholder="ឧ. 16"
+                          className="w-full bg-[#131b2e] text-gray-100 text-xs rounded-lg px-2.5 py-2 border border-slate-700 outline-none focus:border-cyan-400"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] text-gray-400 uppercase mb-1">
+                          GPU (ក្រាហ្វិកកាត)
+                        </label>
+                        <input
+                          type="text"
+                          list="kani-gpu-presets"
+                          value={userPcSpecs.gpu}
+                          onChange={(e) => updateUserPcField('gpu', e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              void handleCheckWithAi();
+                            }
+                          }}
+                          placeholder="ឧ. RTX 3060 / GTX 1650"
+                          className="w-full bg-[#131b2e] text-gray-100 text-xs rounded-lg px-2.5 py-2 border border-slate-700 outline-none focus:border-cyan-400"
+                        />
+                        <datalist id="kani-gpu-presets">
+                          {GPU_PRESETS.map((gpu) => (
+                            <option key={gpu} value={gpu} />
+                          ))}
+                        </datalist>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] text-gray-400 uppercase mb-1">
+                          Storage ទំនេរ (GB)
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={20000}
+                          value={userPcSpecs.storageFreeGb ?? ''}
+                          onChange={(e) => {
+                            const parsed = parseInt(e.target.value, 10);
+                            updateUserPcField(
+                              'storageFreeGb',
+                              Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
+                            );
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              void handleCheckWithAi();
+                            }
+                          }}
+                          placeholder="ឧ. 150 (ស្រេចចិត្ត)"
+                          className="w-full bg-[#131b2e] text-gray-100 text-xs rounded-lg px-2.5 py-2 border border-slate-700 outline-none focus:border-cyan-400"
+                        />
+                      </div>
+                    </div>
+
+                    {aiError && (
+                      <div className="rounded-lg bg-rose-950/45 border border-rose-500/40 px-3 py-2 text-[11px] text-rose-200 flex items-start gap-2">
+                        <i className="fa-solid fa-triangle-exclamation text-rose-400 mt-0.5"></i>
+                        <span>{aiError}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Comparison Verdict & Rows */}
+                  {specLoading ? (
+                    <div className="p-4 rounded-xl bg-[#090f1d] border border-cyan-500/30 text-xs text-cyan-200 flex items-center gap-2">
+                      <i className="fa-solid fa-spinner fa-spin"></i>
+                      <span>កំពុងទាញ Spec របស់ហ្គេមពី Steam ដើម្បីផ្ទៀងផ្ទាត់...</span>
+                    </div>
+                  ) : !steamSpec ? (
+                    <div className="p-4 rounded-xl bg-amber-950/30 border border-amber-500/35 text-xs text-amber-200 flex items-center justify-between gap-3">
+                      <span>មិនទាន់មាន Steam PC Spec សម្រាប់ហ្គេមនេះទេ ដើម្បីផ្ទៀងផ្ទាត់។</span>
+                      <button
+                        type="button"
+                        onClick={() => void loadSpecs(game, false)}
+                        className="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-semibold shrink-0 cursor-pointer"
+                      >
+                        Load Steam Spec
+                      </button>
+                    </div>
+                  ) : (
+                    compatibilityReport && (
+                      <div className="space-y-3">
+                        <div
+                          className={`p-3.5 rounded-xl border flex items-start gap-3 ${
+                            compatibilityReport.overall === 'recommended'
+                              ? 'bg-emerald-950/50 border-emerald-500/55 text-emerald-100'
+                              : compatibilityReport.overall === 'minimum'
+                              ? 'bg-cyan-950/50 border-cyan-500/50 text-cyan-100'
+                              : compatibilityReport.overall === 'below'
+                              ? 'bg-rose-950/50 border-rose-500/55 text-rose-100'
+                              : 'bg-amber-950/40 border-amber-500/45 text-amber-100'
+                          }`}
+                        >
+                          <div className="mt-0.5 text-lg shrink-0">
+                            <i
+                              className={`fa-solid ${
+                                compatibilityReport.overall === 'recommended'
+                                  ? 'fa-circle-check text-emerald-400'
+                                  : compatibilityReport.overall === 'minimum'
+                                  ? 'fa-circle-check text-cyan-400'
+                                  : compatibilityReport.overall === 'below'
+                                  ? 'fa-circle-xmark text-rose-400'
+                                  : 'fa-circle-exclamation text-amber-400'
+                              }`}
+                            ></i>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-bold text-xs sm:text-sm">
+                                {compatibilityReport.headlineKm}
+                              </span>
+                              {compatibilityReport.analyzedByAi && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-indigo-500/25 border border-cyan-400/45 text-cyan-200 text-[10px] font-semibold">
+                                  <i className="fa-solid fa-sparkles text-[9px]"></i>
+                                  <span>Google AI Analysis</span>
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] opacity-85 mt-0.5">
+                              {compatibilityReport.headlineEn} — {compatibilityReport.summaryKm}
+                            </div>
+                          </div>
+                        </div>
+
+                      <div className="divide-y divide-slate-800/80 rounded-xl border border-slate-800 bg-[#090f1d] overflow-hidden">
+                        {compatibilityReport.components.map((row) => (
+                          <div
+                            key={row.key}
+                            className="p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs"
+                          >
+                            <div className="min-w-0 flex-1 space-y-0.5">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-orbitron font-bold text-[11px] text-white uppercase">
+                                  {row.label}
+                                </span>
+                                <span className="text-[11px] text-gray-400">({row.labelKm})</span>
+                                <span
+                                  className={`text-[10px] font-bold px-2 py-0.5 rounded ${
+                                    row.status === 'recommended'
+                                      ? 'bg-emerald-600/80 text-white'
+                                      : row.status === 'minimum'
+                                      ? 'bg-cyan-700/80 text-white'
+                                      : row.status === 'below'
+                                      ? 'bg-rose-600/85 text-white'
+                                      : 'bg-slate-700 text-gray-200'
+                                  }`}
+                                >
+                                  {row.status === 'recommended'
+                                    ? 'Recommended ✓'
+                                    : row.status === 'minimum'
+                                    ? 'Minimum OK'
+                                    : row.status === 'below'
+                                    ? 'Not Enough ✕'
+                                    : 'Manual Check'}
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-gray-300">{row.note}</p>
+                            </div>
+
+                            <div className="grid grid-cols-3 gap-2 sm:w-[340px] shrink-0 text-[10px]">
+                              <div className="bg-[#11192e] rounded px-2 py-1 border border-slate-800">
+                                <span className="text-gray-400 block">Your PC</span>
+                                <span className="text-white font-semibold line-clamp-2">
+                                  {row.userValue}
+                                </span>
+                              </div>
+                              <div className="bg-[#11192e] rounded px-2 py-1 border border-slate-800">
+                                <span className="text-cyan-300/80 block">Minimum</span>
+                                <span className="text-gray-200 line-clamp-2">{row.minValue}</span>
+                              </div>
+                              <div className="bg-[#11192e] rounded px-2 py-1 border border-slate-800">
+                                <span className="text-fuchsia-300/80 block">Recommended</span>
+                                <span className="text-gray-200 line-clamp-2">{row.recValue}</span>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )
+                )}
               </div>
             )}
 
