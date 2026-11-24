@@ -3,6 +3,7 @@ import { SiteSettings } from '../types/game';
 import { compressImageFile } from '../utils/imageUtils';
 
 export const DEFAULT_COVER_IMAGE = '/assets/aistudio/image_81ca6681.png';
+export const DEFAULT_EXTERNAL_COVER_IMAGE = '/assets/external_heroes_cover.jpg';
 
 export function extractYouTubeVideoId(url?: string): string | null {
   if (!url) return null;

@@ -71,7 +71,7 @@ export interface SteamOnlineAutoSyncConfig {
   updatedAt?: string;
 }
 
-export type GameTab = 'steam' | 'steam-online' | 'free' | 'product' | 'all';
+export type GameTab = 'steam' | 'steam-online' | 'free' | 'product' | 'contact' | 'all';
 
 export type AppViewMode = 'store' | 'pos' | 'admin';
 
@@ -195,7 +195,9 @@ export interface CoverCard {
 export interface SteamOnlineCoverSlide {
   id: string;
   mediaType: 'photo' | 'video';
+  mediaLayout?: 'side' | 'full';
   mediaUrl: string;
+  rightMediaUrl?: string;
   title: string;
   subtitle?: string;
   ctaLabel?: string;
@@ -217,6 +219,12 @@ export interface SiteSettings {
   heroCoverRightImage?: string;
   heroCoverVideo?: string;
   telegramAdminHandle: string;
+  telegramGroupUrl?: string;
+  facebookUrl?: string;
+  youtubeUrl?: string;
+  googleMapUrl?: string;
+  storeAddress?: string;
+  storeHours?: string;
   telegramNotePlaceholder: string;
   customMessagePrefix?: string;
   khrExchangeRate?: number; // Default 4100

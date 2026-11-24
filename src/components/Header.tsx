@@ -36,24 +36,29 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
   onSecretAdminTrigger,
 }) => {
-  const [logoTapCount, setLogoTapCount] = React.useState(0);
-  const logoTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const logoTapCountRef = React.useRef(0);
+  const logoTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  React.useEffect(() => {
+    return () => {
+      if (logoTimerRef.current) clearTimeout(logoTimerRef.current);
+    };
+  }, []);
 
   const handleLogoTap = () => {
-    setLogoTapCount((prev) => {
-      const next = prev + 1;
-      if (next >= 5) {
-        if (logoTimerRef.current) clearTimeout(logoTimerRef.current);
-        onSecretAdminTrigger?.();
-        return 0;
-      }
-      return next;
-    });
+    const next = logoTapCountRef.current + 1;
 
     if (logoTimerRef.current) clearTimeout(logoTimerRef.current);
-    logoTimerRef.current = setTimeout(() => {
-      setLogoTapCount(0);
-    }, 2500);
+
+    if (next >= 5) {
+      logoTapCountRef.current = 0;
+      onSecretAdminTrigger?.();
+    } else {
+      logoTapCountRef.current = next;
+      logoTimerRef.current = setTimeout(() => {
+        logoTapCountRef.current = 0;
+      }, 2500);
+    }
 
     onTabChange('steam');
     onClearSearch?.();
@@ -192,6 +197,24 @@ export const Header: React.FC<HeaderProps> = ({
                 <span className="text-[11px] font-semibold tabular-nums text-gray-400">
                   {freeCount}
                 </span>
+              </a>
+
+              <a
+                href="#contact"
+                onClick={(e) => {
+                  if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
+                    e.preventDefault();
+                    onTabChange('contact');
+                  }
+                }}
+                className={`relative py-2 font-orbitron font-bold text-xs lg:text-[13px] tracking-wide transition-colors duration-200 flex items-baseline gap-2 cursor-pointer whitespace-nowrap shrink-0 border-b-2 ${
+                  activeTab === 'contact'
+                    ? 'text-white border-cyan-400'
+                    : 'text-gray-400 hover:text-gray-100 border-transparent'
+                }`}
+                title="Telegram, Facebook, YouTube & Google Map"
+              >
+                <span>Contact</span>
               </a>
 
               {/* POS Cashier Link (Only shown when admin/owner is logged in) */}
@@ -333,7 +356,7 @@ export const Header: React.FC<HeaderProps> = ({
 
         {/* Mobile Tab Switcher - Only in Store View */}
         {!isAdminView && !isPosView && (
-          <div className="md:hidden flex items-center justify-center border-t border-[#1f293d]/50 py-2 gap-4 overflow-x-auto">
+          <div className="md:hidden flex items-center justify-start sm:justify-center border-t border-[#1f293d]/50 py-2 px-1 gap-4 overflow-x-auto">
             <a
               href="#steam"
               onClick={(e) => {
@@ -401,6 +424,22 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <span>GameថែមExternal</span>
               <span className="text-[10px] font-semibold tabular-nums text-gray-400">{freeCount}</span>
+            </a>
+            <a
+              href="#contact"
+              onClick={(e) => {
+                if (!e.ctrlKey && !e.metaKey && !e.shiftKey && e.button === 0) {
+                  e.preventDefault();
+                  onTabChange('contact');
+                }
+              }}
+              className={`py-1.5 font-orbitron font-bold text-[11px] tracking-wide whitespace-nowrap shrink-0 flex items-baseline gap-1.5 transition border-b-2 cursor-pointer ${
+                activeTab === 'contact'
+                  ? 'text-white border-cyan-400'
+                  : 'text-gray-400 border-transparent'
+              }`}
+            >
+              <span>Contact</span>
             </a>
             {isLoggedIn && (
               <button

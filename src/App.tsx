@@ -20,6 +20,7 @@ import { CoverMediaModal } from './components/CoverMediaModal';
 import { SteamOnlineSyncModal, SteamSyncModalState, SteamSyncFeedItem } from './components/SteamOnlineSyncModal';
 import { SteamOnlineCover, PromoCoverTarget } from './components/SteamOnlineCover';
 import { SteamOnlineCoverModal } from './components/SteamOnlineCoverModal';
+import { ContactCatalog } from './components/ContactCatalog';
 import { computeSteamOnlinePricing } from './utils/pricingUtils';
 
 const getTabFromUrl = (): GameTab => {
@@ -45,6 +46,15 @@ const getTabFromUrl = (): GameTab => {
     pathname.endsWith('/product')
   ) {
     return 'product';
+  }
+
+  if (
+    hash === '#contact' ||
+    hash.includes('contact') ||
+    tabParam === 'contact' ||
+    pathname.endsWith('/contact')
+  ) {
+    return 'contact';
   }
 
   if (
@@ -226,6 +236,8 @@ export default function App() {
           ? '#steam-online'
           : initialTab === 'product'
           ? '#product'
+          : initialTab === 'contact'
+          ? '#contact'
           : '#external';
       window.history.replaceState(null, '', expectedHash);
     }
@@ -419,6 +431,8 @@ export default function App() {
       ? '#steam-online'
       : tab === 'product'
       ? '#product'
+      : tab === 'contact'
+      ? '#contact'
       : '#external';
 
   const handleTabChange = (tab: GameTab) => {
@@ -503,24 +517,29 @@ export default function App() {
     }
   };
 
-  const [footerTapCount, setFooterTapCount] = useState(0);
-  const footerTapTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const footerTapCountRef = useRef(0);
+  const footerTapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (footerTapTimerRef.current) clearTimeout(footerTapTimerRef.current);
+    };
+  }, []);
 
   const handleFooterSecretTap = () => {
-    setFooterTapCount((prev) => {
-      const next = prev + 1;
-      if (next >= 5) {
-        if (footerTapTimerRef.current) clearTimeout(footerTapTimerRef.current);
-        handleSecretTrigger();
-        return 0;
-      }
-      return next;
-    });
+    const next = footerTapCountRef.current + 1;
 
     if (footerTapTimerRef.current) clearTimeout(footerTapTimerRef.current);
-    footerTapTimerRef.current = setTimeout(() => {
-      setFooterTapCount(0);
-    }, 2500);
+
+    if (next >= 5) {
+      footerTapCountRef.current = 0;
+      handleSecretTrigger();
+    } else {
+      footerTapCountRef.current = next;
+      footerTapTimerRef.current = setTimeout(() => {
+        footerTapCountRef.current = 0;
+      }, 2500);
+    }
   };
 
 
@@ -629,17 +648,21 @@ export default function App() {
 
   // Game Selection handlers
   const toggleSelectGame = (game: Game) => {
+    const isRemoving = Boolean(selectedGamesMap[game.id]);
     setSelectedGamesMap((prev) => {
       const copy = { ...prev };
       if (copy[game.id]) {
         delete copy[game.id];
-        showToast(`បានលុប ${game.name} ចេញពីបញ្ជី`);
       } else {
         copy[game.id] = game;
-        showToast(`បានបន្ថែម ${game.name} ទៅបញ្ជី`);
       }
       return copy;
     });
+    if (isRemoving) {
+      showToast(`បានលុប ${game.name} ចេញពីបញ្ជី`);
+    } else {
+      showToast(`បានបន្ថែម ${game.name} ទៅបញ្ជី`);
+    }
   };
 
   const handleSelectAllVisible = () => {
@@ -760,7 +783,7 @@ export default function App() {
     setCurrentUsername('');
     setIsAdminView(false);
     setIsPosView(false);
-    window.location.hash = activeTab === 'steam' ? '#steam' : activeTab === 'product' ? '#product' : '#external';
+    window.location.hash = getHashForTab(activeTab);
     showToast('Logged out successfully.');
   };
 
@@ -941,7 +964,15 @@ export default function App() {
         />
       ) : (
         <main className="flex-1 w-full max-w-[3600px] mx-auto px-4 sm:px-6 lg:px-8 xl:px-10 2xl:px-12 py-6">
-
+          {activeTab === 'contact' ? (
+            <ContactCatalog
+              settings={settings}
+              canEdit={isLoggedIn && currentUserRole !== 'pos'}
+              onSaveSettings={handleSaveSettings}
+              onShowToast={showToast}
+            />
+          ) : (
+            <>
           {/* Distinct Hero Showcase per Category: Steam Offline (HeroBanner) vs Steam Online / Product / External */}
           {activeTab === 'steam-online' ? (
             <SteamOnlineCover
@@ -1246,6 +1277,8 @@ export default function App() {
                 />
               ))}
             </div>
+          )}
+            </>
           )}
 
           {/* Storefront Footer */}

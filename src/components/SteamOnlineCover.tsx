@@ -1,6 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Game, SiteSettings, SteamOnlineCoverSlide } from '../types/game';
-import { DEFAULT_COVER_IMAGE, extractYouTubeVideoId } from './CoverMediaModal';
+import {
+  DEFAULT_COVER_IMAGE,
+  DEFAULT_EXTERNAL_COVER_IMAGE,
+  extractYouTubeVideoId,
+} from './CoverMediaModal';
 import { computeSteamOnlinePricing, getSteamHeroBackdropCandidates } from '../utils/pricingUtils';
 
 export type PromoCoverTarget = 'steam-online' | 'product' | 'external';
@@ -85,10 +89,10 @@ export const SteamOnlineCover: React.FC<SteamOnlineCoverProps> = ({
         {
           id: 'default_external_cover',
           mediaType: 'photo',
-          mediaUrl: topGameBackdrop,
+          mediaUrl: DEFAULT_EXTERNAL_COVER_IMAGE,
           title: 'GAME ថែមពេលទិញ EXTERNAL',
           subtitle:
-            'ជ្រើសរើសហ្គេម PC ពេញនិយមជាច្រើនដោយឥតគិតថ្លៃ នៅពេលទិញ External Hard Disk ពីហាងយើងខ្ញុំ',
+            'ជ្រើសរើសហ្គេម PC ពេញនិយមជាច្រើនដោយឥតគិតថ្លៃ (រួមទាំងហ្គេមថ្មីៗ និង GTA) នៅពេលទិញ External Hard Disk ពីហាងយើងខ្ញុំ',
           ctaLabel: 'ទាក់ទង Admin',
           discountPrefix: 'External',
           discountHighlight: 'FREE GAMES',
@@ -149,7 +153,9 @@ export const SteamOnlineCover: React.FC<SteamOnlineCoverProps> = ({
     setActiveIndex((prev) => (prev + 1) % slides.length);
   };
 
-  const mediaUrl = activeSlide.mediaUrl?.trim() || DEFAULT_COVER_IMAGE;
+  const fallbackCoverImg =
+    variant === 'external' ? DEFAULT_EXTERNAL_COVER_IMAGE : DEFAULT_COVER_IMAGE;
+  const mediaUrl = activeSlide.mediaUrl?.trim() || fallbackCoverImg;
   const isVideo = activeSlide.mediaType === 'video' && Boolean(activeSlide.mediaUrl?.trim());
   const youtubeId = isVideo ? extractYouTubeVideoId(mediaUrl) : null;
   const hasImgError = Boolean(imgErrorMap[activeSlide.id]);
@@ -183,7 +189,7 @@ export const SteamOnlineCover: React.FC<SteamOnlineCoverProps> = ({
       </>
     ) : null;
 
-  const renderMediaLayer = (extraClass = 'opacity-75') =>
+  const renderMediaLayer = (extraClass = 'opacity-75', positionClass = 'object-center') =>
     isVideo ? (
       <div aria-hidden="true" className="absolute inset-0 overflow-hidden pointer-events-none">
         {youtubeId ? (
@@ -204,7 +210,7 @@ export const SteamOnlineCover: React.FC<SteamOnlineCoverProps> = ({
             loop
             muted={isMuted}
             playsInline
-            className={`w-full h-full object-cover ${extraClass}`}
+            className={`w-full h-full object-cover ${positionClass} ${extraClass}`}
           />
         )}
       </div>
@@ -220,7 +226,7 @@ export const SteamOnlineCover: React.FC<SteamOnlineCoverProps> = ({
             [activeSlide.id]: true,
           }))
         }
-        className={`absolute inset-0 w-full h-full object-cover object-center transition-opacity duration-500 ${extraClass}`}
+        className={`absolute inset-0 w-full h-full object-cover ${positionClass} transition-opacity duration-500 ${extraClass}`}
       />
     ) : (
       <div
@@ -362,137 +368,342 @@ export const SteamOnlineCover: React.FC<SteamOnlineCoverProps> = ({
     );
   }
 
-  // STYLE 3: GAME ថែម EXTERNAL — Widescreen Cinema Viewport + Bottom Docked Emerald Action Bar
+  // STYLE 3: GAME ថែម EXTERNAL — Steam Offline Chamfered Tactical Frame Style
   if (variant === 'external') {
+    const extTitle = (activeSlide.title || 'GAME ថែម EXTERNAL').trim();
+    const extParts = extTitle.split(/\s+/);
+    const extLeading = extParts.length > 1 ? extParts.slice(0, -1).join(' ') : '';
+    const extAccent = extParts.length > 1 ? extParts[extParts.length - 1] : extTitle;
+    const extLayout: 'side' | 'full' = activeSlide.mediaLayout === 'full' ? 'full' : 'side';
+    const leftExtImg = mediaUrl;
+    const rightExtImg = activeSlide.rightMediaUrl?.trim() || mediaUrl;
+    const isDefaultLeftExtImg = leftExtImg === DEFAULT_EXTERNAL_COVER_IMAGE;
+    const isDefaultRightExtImg = rightExtImg === DEFAULT_EXTERNAL_COVER_IMAGE;
+
     return (
       <section
         aria-label="External Free Games Showcase Cover"
         onMouseEnter={() => setIsPaused(true)}
         onMouseLeave={() => setIsPaused(false)}
-        className="relative mb-8 rounded-2xl overflow-hidden bg-[#060d12] border border-emerald-500/30 shadow-[0_24px_60px_rgba(3,16,20,0.88)] select-none"
+        className="relative mb-8 py-4 select-none"
       >
-        {/* Top Wide Unobstructed Photo / Video Viewport */}
-        <div className="relative h-[220px] sm:h-[260px] lg:h-[300px] overflow-hidden bg-[#050b0f]">
-          {renderMediaLayer('opacity-90')}
+        {/* Top Notch Crosses (Outside Upper Notch) */}
+        <div
+          aria-hidden="true"
+          className="flex items-center justify-center gap-1.5 text-[10px] font-mono tracking-widest mb-1.5"
+        >
+          <span className="text-purple-400">×</span>
+          <span className="text-fuchsia-400">×</span>
+          <span className="text-cyan-400">×</span>
+        </div>
+
+        {/* Main Chamfered Tactical Frame */}
+        <div
+          className="relative overflow-hidden bg-[#0c0820] shadow-[0_20px_60px_rgba(12,6,34,0.85)]"
+          style={{
+            clipPath:
+              'polygon(18px 0%, calc(50% - 74px) 0%, calc(50% - 58px) 12px, calc(50% + 58px) 12px, calc(50% + 74px) 0%, calc(100% - 18px) 0%, 100% 18px, 100% calc(100% - 18px), calc(100% - 18px) 100%, calc(50% + 74px) 100%, calc(50% + 58px) calc(100% - 12px), calc(50% - 58px) calc(100% - 12px), calc(50% - 74px) 100%, 18px 100%, 0% calc(100% - 18px), 0% 18px)',
+          }}
+        >
+          {/* Base Ambient Deep Purple Backdrop */}
           <div
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#060f16] via-[#060f16]/15 to-[#060f16]/45"
+            className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_#25134e_0%,_#130b2c_52%,_#090716_100%)]"
           />
 
-          {/* Top-Right Admin & Audio Controls */}
-          <div className="absolute top-3.5 right-4 z-30 flex items-center gap-2">
-            {isVideo && !youtubeId && (
-              <button
-                type="button"
-                onClick={() => setIsMuted((prev) => !prev)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-rajdhani font-bold text-slate-200 bg-[#07131a]/85 hover:bg-slate-800 border border-emerald-500/35 backdrop-blur-md transition cursor-pointer"
-                title={isMuted ? 'Unmute Cover Video' : 'Mute Cover Video'}
+          {/* Cover Media Background: Video or Photo (Full or Side Panels like Steam Offline) */}
+          {isVideo ? (
+            extLayout === 'full' ? (
+              <div aria-hidden="true" className="absolute inset-0 overflow-hidden pointer-events-none">
+                {youtubeId ? (
+                  <iframe
+                    key={`${activeSlide.id}-yt`}
+                    src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=${
+                      isMuted ? 1 : 0
+                    }&loop=1&playlist=${youtubeId}&controls=0&showinfo=0&rel=0&modestbranding=1&playsinline=1`}
+                    title={activeSlide.title || 'Cover Video'}
+                    className="absolute inset-0 w-full h-full scale-[1.25] object-cover opacity-65"
+                    allow="autoplay; encrypted-media"
+                  />
+                ) : (
+                  <video
+                    key={`${activeSlide.id}-${mediaUrl}`}
+                    src={mediaUrl}
+                    autoPlay
+                    loop
+                    muted={isMuted}
+                    playsInline
+                    className="w-full h-full object-cover opacity-70"
+                  />
+                )}
+                <div className="absolute inset-0 bg-gradient-to-b from-[#090716]/60 via-[#0c0820]/50 to-[#090716]/75" />
+              </div>
+            ) : (
+              <>
+                <div
+                  aria-hidden="true"
+                  className="hidden md:block absolute inset-y-0 left-0 w-[28%] lg:w-[25%] max-w-[400px] overflow-hidden pointer-events-none"
+                >
+                  {youtubeId ? (
+                    <iframe
+                      src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=1&loop=1&playlist=${youtubeId}&controls=0&rel=0&playsinline=1`}
+                      title="Left Cover Video"
+                      className="w-full h-full scale-150 opacity-85"
+                      allow="autoplay; encrypted-media"
+                    />
+                  ) : (
+                    <video
+                      key={`left-${mediaUrl}`}
+                      src={mediaUrl}
+                      autoPlay
+                      loop
+                      muted={isMuted}
+                      playsInline
+                      className="w-full h-full object-cover opacity-85"
+                    />
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-r from-[#090716]/30 via-transparent to-[#140b2e]" />
+                  <div className="absolute inset-y-0 right-0 w-24 bg-gradient-to-l from-[#140b2e] via-[#140b2e]/85 to-transparent" />
+                </div>
+                <div
+                  aria-hidden="true"
+                  className="hidden md:block absolute inset-y-0 right-0 w-[28%] lg:w-[25%] max-w-[400px] overflow-hidden pointer-events-none"
+                >
+                  {youtubeId ? (
+                    <iframe
+                      src={`https://www.youtube.com/embed/${youtubeId}?autoplay=1&mute=1&loop=1&playlist=${youtubeId}&controls=0&rel=0&playsinline=1`}
+                      title="Right Cover Video"
+                      className="w-full h-full scale-150 opacity-85"
+                      allow="autoplay; encrypted-media"
+                    />
+                  ) : (
+                    <video
+                      key={`right-${mediaUrl}`}
+                      src={mediaUrl}
+                      autoPlay
+                      loop
+                      muted
+                      playsInline
+                      className="w-full h-full object-cover opacity-85"
+                    />
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-l from-[#090716]/30 via-transparent to-[#140b2e]" />
+                  <div className="absolute inset-y-0 left-0 w-24 bg-gradient-to-r from-[#140b2e] via-[#140b2e]/85 to-transparent" />
+                </div>
+              </>
+            )
+          ) : extLayout === 'full' ? (
+            !hasImgError && leftExtImg ? (
+              <div aria-hidden="true" className="absolute inset-0 overflow-hidden pointer-events-none">
+                <img
+                  key={`${activeSlide.id}-full-${leftExtImg}`}
+                  src={leftExtImg}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  onError={() =>
+                    setImgErrorMap((prev) => ({
+                      ...prev,
+                      [activeSlide.id]: true,
+                    }))
+                  }
+                  className="w-full h-full object-cover object-center opacity-55"
+                />
+                <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_rgba(12,8,32,0.58)_0%,_rgba(9,7,22,0.82)_100%)]" />
+              </div>
+            ) : null
+          ) : !hasImgError && leftExtImg ? (
+            <>
+              {/* Left Character Artwork Panel */}
+              <div
+                aria-hidden="true"
+                className="hidden md:block absolute inset-y-0 left-0 w-[28%] lg:w-[25%] max-w-[400px] overflow-hidden pointer-events-none"
               >
-                <i
-                  className={`fa-solid ${
-                    isMuted ? 'fa-volume-xmark text-slate-400' : 'fa-volume-high text-emerald-300'
+                <img
+                  key={`${activeSlide.id}-left-${leftExtImg}`}
+                  src={leftExtImg}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  onError={() =>
+                    setImgErrorMap((prev) => ({
+                      ...prev,
+                      [activeSlide.id]: true,
+                    }))
+                  }
+                  className={`w-full h-full object-cover opacity-85 ${
+                    isDefaultLeftExtImg ? 'object-[16%_25%]' : 'object-center'
                   }`}
-                ></i>
-                <span>{isMuted ? 'Muted' : 'Sound On'}</span>
-              </button>
+                />
+                <div className="absolute inset-0 bg-gradient-to-r from-[#090716]/30 via-transparent to-[#140b2e]" />
+                <div className="absolute inset-y-0 right-0 w-24 bg-gradient-to-l from-[#140b2e] via-[#140b2e]/85 to-transparent" />
+                <div className="absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-[#0c0820] to-transparent" />
+                <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[#0c0820] to-transparent" />
+              </div>
+
+              {/* Right Character Artwork Panel */}
+              <div
+                aria-hidden="true"
+                className="hidden md:block absolute inset-y-0 right-0 w-[28%] lg:w-[25%] max-w-[400px] overflow-hidden pointer-events-none"
+              >
+                <img
+                  key={`${activeSlide.id}-right-${rightExtImg}`}
+                  src={rightExtImg}
+                  alt=""
+                  referrerPolicy="no-referrer"
+                  className={`w-full h-full object-cover opacity-85 ${
+                    isDefaultRightExtImg ? 'object-[84%_25%]' : 'object-center'
+                  }`}
+                />
+                <div className="absolute inset-0 bg-gradient-to-l from-[#090716]/30 via-transparent to-[#140b2e]" />
+                <div className="absolute inset-y-0 left-0 w-24 bg-gradient-to-r from-[#140b2e] via-[#140b2e]/85 to-transparent" />
+                <div className="absolute inset-x-0 top-0 h-10 bg-gradient-to-b from-[#0c0820] to-transparent" />
+                <div className="absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-[#0c0820] to-transparent" />
+              </div>
+            </>
+          ) : null}
+
+          {/* Subtle Center Ambient Glows */}
+          <div
+            aria-hidden="true"
+            className="absolute inset-y-0 left-1/2 -translate-x-1/2 w-[58%] bg-[radial-gradient(circle_at_center,_rgba(168,85,247,0.18)_0%,_rgba(56,189,248,0.06)_55%,_transparent_75%)] pointer-events-none"
+          />
+
+          {/* Central Protective Contrast Scrim */}
+          <div
+            aria-hidden="true"
+            className="hidden md:block absolute inset-y-0 left-[18%] right-[18%] bg-gradient-to-r from-transparent via-[#170d36]/80 to-transparent pointer-events-none"
+          />
+
+          {/* Admin Quick Button on Cover: Edit External Cover */}
+          {canEditCover && onEditCover && (
+            <button
+              type="button"
+              onClick={onEditCover}
+              className="absolute top-3 right-5 z-30 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-orbitron font-bold text-cyan-200 bg-[#0d1324]/85 hover:bg-purple-900/90 border border-cyan-400/50 hover:border-fuchsia-400 shadow-lg backdrop-blur-md transition cursor-pointer"
+              title="Edit External Cover Photo or Video"
+            >
+              <i className="fa-solid fa-photo-film text-cyan-300"></i>
+              <span>Change Photo / Video</span>
+            </button>
+          )}
+
+          {/* Sound Toggle for Direct Video Cover */}
+          {isVideo && !youtubeId && (
+            <button
+              type="button"
+              onClick={() => setIsMuted((prev) => !prev)}
+              className="absolute bottom-3 right-5 z-30 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] font-rajdhani font-bold text-gray-200 bg-[#0d1324]/80 hover:bg-purple-900/80 border border-purple-500/40 backdrop-blur-md transition cursor-pointer"
+              title={isMuted ? 'Unmute Cover Video' : 'Mute Cover Video'}
+            >
+              <i
+                className={`fa-solid ${
+                  isMuted ? 'fa-volume-xmark text-gray-400' : 'fa-volume-high text-cyan-300'
+                }`}
+              ></i>
+              <span>{isMuted ? 'Muted' : 'Sound On'}</span>
+            </button>
+          )}
+
+          {/* Neon Chamfered Frame SVG Border */}
+          <svg
+            aria-hidden="true"
+            viewBox="0 0 1200 360"
+            preserveAspectRatio="none"
+            className="absolute inset-0 w-full h-full pointer-events-none z-20"
+          >
+            <defs>
+              <linearGradient id="externalHeroNeonBorder" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="#a855f7" />
+                <stop offset="45%" stopColor="#d946ef" />
+                <stop offset="72%" stopColor="#6366f1" />
+                <stop offset="100%" stopColor="#22d3ee" />
+              </linearGradient>
+            </defs>
+            <polygon
+              points="18,1 526,1 542,13 658,13 674,1 1182,1 1199,18 1199,342 1182,359 674,359 658,347 542,347 526,359 18,359 1,342 1,18"
+              fill="none"
+              stroke="url(#externalHeroNeonBorder)"
+              strokeWidth="2"
+              vectorEffect="non-scaling-stroke"
+            />
+          </svg>
+
+          {/* Centered Hero Content */}
+          <div className="relative z-10 flex flex-col items-center justify-center text-center px-6 sm:px-10 md:px-16 py-10 sm:py-12 md:py-14 min-h-[300px] sm:min-h-[340px]">
+            {/* Inner Cross Accent */}
+            <div
+              aria-hidden="true"
+              className="flex items-center justify-center gap-1.5 text-[10px] font-mono tracking-widest text-purple-300/70 mb-2"
+            >
+              <span>×</span>
+              <span>×</span>
+              <span>×</span>
+            </div>
+
+            {/* Brand / External Display Title */}
+            <h2 className="font-orbitron font-black text-3xl sm:text-4xl md:text-5xl tracking-[0.16em] leading-none mb-3 drop-shadow-[0_4px_20px_rgba(168,85,247,0.35)] text-balance">
+              {extLeading && <span className="text-white">{extLeading} </span>}
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-400 via-fuchsia-400 to-cyan-300">
+                {extAccent}
+              </span>
+            </h2>
+
+            {/* Main Subheadline */}
+            {showDiscount && (discountPrefix || discountHighlight) && (
+              <p className="font-rajdhani font-bold text-sm sm:text-base md:text-lg text-white uppercase tracking-[0.08em] mb-2.5 max-w-2xl text-balance">
+                {[discountPrefix, discountHighlight].filter(Boolean).join(' · ')}
+              </p>
             )}
 
-            {canEditCover && onEditCover && (
-              <button
-                type="button"
-                onClick={onEditCover}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-orbitron font-bold text-white bg-[#07131a]/90 hover:bg-emerald-600 border border-emerald-400/50 shadow-lg backdrop-blur-md transition cursor-pointer whitespace-nowrap"
-                title="Edit External Cover Photo, Video & Text"
-              >
-                <i className="fa-solid fa-photo-film text-emerald-300"></i>
-                <span>Edit External Cover</span>
-              </button>
+            {/* Khmer Instruction Description */}
+            {activeSlide.subtitle?.trim() && (
+              <p className="text-xs sm:text-sm text-gray-300/95 leading-relaxed max-w-xl mx-auto mb-6">
+                {activeSlide.subtitle}
+              </p>
             )}
+
+            {/* Centered CTA Button */}
+            <div className="flex flex-wrap items-center justify-center gap-3 sm:gap-4 mb-5">
+              {activeSlide.ctaLabel?.trim() && (
+                <button
+                  type="button"
+                  onClick={onOpenTelegram}
+                  className="inline-flex items-center justify-center gap-2.5 px-5 sm:px-6 py-2.5 rounded-lg text-xs sm:text-sm font-orbitron font-bold text-white bg-gradient-to-r from-purple-600 via-fuchsia-600 to-purple-500 hover:from-purple-500 hover:to-fuchsia-500 border border-fuchsia-400/50 shadow-[0_0_24px_rgba(168,85,247,0.45)] transition-all duration-200 hover:-translate-y-0.5 whitespace-nowrap shrink-0 cursor-pointer"
+                >
+                  <i className="fa-brands fa-telegram text-base"></i>
+                  <span>{activeSlide.ctaLabel}</span>
+                </button>
+              )}
+            </div>
+
+            {/* Unboxed Clean Catalog Stats (Zero-Pill) */}
+            <div className="flex flex-wrap items-center justify-center gap-3 text-xs sm:text-[13px] font-rajdhani font-semibold tracking-wide text-gray-300 tabular-nums">
+              <span>
+                External Games: <strong className="text-cyan-400 font-bold">{games.length}</strong>
+              </span>
+              {slides.length > 1 && (
+                <>
+                  <span aria-hidden="true" className="text-purple-400/50">
+                    ·
+                  </span>
+                  <span>
+                    Slide: <strong className="text-fuchsia-400 font-bold">{safeIndex + 1}/{slides.length}</strong>
+                  </span>
+                </>
+              )}
+            </div>
           </div>
 
           {slideControls}
         </div>
 
-        {/* Bottom Docked Architectural Content Bar */}
-        <div className="relative z-10 px-6 sm:px-8 lg:px-10 py-5 bg-[#060f16] border-t border-emerald-500/25 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div className="space-y-1.5 max-w-3xl">
-            <div className="flex flex-wrap items-center gap-2 text-xs font-rajdhani font-bold tracking-wider uppercase text-emerald-400">
-              <span>External HDD Bonus</span>
-              {showDiscount && (discountPrefix || discountHighlight) && (
-                <>
-                  <span aria-hidden="true" className="text-slate-600">·</span>
-                  <span className="text-cyan-300">
-                    {[discountPrefix, discountHighlight].filter(Boolean).join(' ')}
-                  </span>
-                </>
-              )}
-              {slides.length > 1 && (
-                <>
-                  <span aria-hidden="true" className="text-slate-600">·</span>
-                  <span className="text-slate-400 tabular-nums">
-                    Slide {safeIndex + 1}/{slides.length}
-                  </span>
-                </>
-              )}
-            </div>
-
-            {activeSlide.title?.trim() && (
-              <h2
-                className="font-orbitron font-black text-white leading-tight tracking-tight text-balance"
-                style={{ fontSize: 'clamp(1.35rem, 2.4vw, 2.15rem)' }}
-              >
-                {activeSlide.title}
-              </h2>
-            )}
-
-            {activeSlide.subtitle?.trim() && (
-              <p className="text-xs sm:text-sm text-slate-300/90 leading-relaxed">
-                {activeSlide.subtitle}
-              </p>
-            )}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 shrink-0">
-            {slides.length > 1 && (
-              <div className="flex items-center gap-1.5 mr-1">
-                {slides.map((s, idx) => (
-                  <button
-                    key={s.id}
-                    type="button"
-                    onClick={() => setActiveIndex(idx)}
-                    aria-label={`Slide ${idx + 1}: ${s.title || 'Slide'}`}
-                    className={`h-2 rounded-full transition-all cursor-pointer ${
-                      idx === safeIndex
-                        ? 'w-6 bg-gradient-to-r from-emerald-400 to-cyan-400'
-                        : 'w-2 bg-slate-700 hover:bg-slate-500'
-                    }`}
-                  />
-                ))}
-              </div>
-            )}
-
-            {activeSlide.ctaLabel?.trim() && (
-              <button
-                type="button"
-                onClick={onOpenTelegram}
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-orbitron font-bold text-xs shadow-[0_8px_22px_rgba(16,185,129,0.3)] transition cursor-pointer whitespace-nowrap shrink-0"
-              >
-                <i className="fa-brands fa-telegram text-sm"></i>
-                <span>{activeSlide.ctaLabel}</span>
-              </button>
-            )}
-
-            {onBrowseCatalog && (
-              <button
-                type="button"
-                onClick={onBrowseCatalog}
-                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#0c1a22] hover:bg-[#122631] text-slate-100 border border-emerald-500/30 hover:border-emerald-400 font-rajdhani font-bold text-xs sm:text-sm transition cursor-pointer whitespace-nowrap shrink-0"
-              >
-                <i className="fa-solid fa-gift text-emerald-400"></i>
-                <span>មើល Game ទាំងអស់ ({games.length})</span>
-              </button>
-            )}
-          </div>
+        {/* Bottom Notch Crosses (Outside Lower Notch) */}
+        <div
+          aria-hidden="true"
+          className="flex items-center justify-center gap-1.5 text-[10px] font-mono tracking-widest mt-1.5"
+        >
+          <span className="text-purple-400">×</span>
+          <span className="text-fuchsia-400">×</span>
+          <span className="text-cyan-400">×</span>
         </div>
       </section>
     );

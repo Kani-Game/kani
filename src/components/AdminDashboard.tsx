@@ -2581,6 +2581,127 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </form>
             </div>
 
+            {/* CONTACT CATALOG LINKS (TELEGRAM GROUP / FACEBOOK / YOUTUBE / GOOGLE MAP) */}
+            <div className="bg-[#0f172a] p-6 sm:p-8 rounded-2xl border border-cyan-500/40 shadow-2xl">
+              <div className="flex items-center gap-3 mb-6 pb-4 border-b border-slate-800">
+                <div className="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-400/35 flex items-center justify-center text-cyan-300">
+                  <i className="fa-solid fa-share-nodes text-xl"></i>
+                </div>
+                <div>
+                  <h3 className="font-orbitron font-bold text-lg text-white">
+                    CONTACT CATALOG LINKS &amp; GOOGLE MAP
+                  </h3>
+                  <p className="text-xs text-gray-400">
+                    Links shown in the storefront Contact tab (Telegram Group, Facebook, YouTube &amp; Google Maps).
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleSaveSettings} className="space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-300 mb-1">
+                      TELEGRAM GROUP LINK
+                    </label>
+                    <input
+                      type="text"
+                      value={localSettings.telegramGroupUrl ?? ''}
+                      onChange={(e) =>
+                        setLocalSettings({ ...localSettings, telegramGroupUrl: e.target.value })
+                      }
+                      placeholder="https://t.me/yourgroup or @yourgroup"
+                      className="w-full bg-[#131b2e] text-xs font-mono text-indigo-200 rounded-xl px-4 py-2.5 border border-purple-900/50 outline-none focus:border-indigo-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-300 mb-1">
+                      FACEBOOK PAGE LINK
+                    </label>
+                    <input
+                      type="text"
+                      value={localSettings.facebookUrl ?? ''}
+                      onChange={(e) =>
+                        setLocalSettings({ ...localSettings, facebookUrl: e.target.value })
+                      }
+                      placeholder="https://www.facebook.com/yourpage"
+                      className="w-full bg-[#131b2e] text-xs font-mono text-blue-200 rounded-xl px-4 py-2.5 border border-purple-900/50 outline-none focus:border-blue-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-300 mb-1">
+                      YOUTUBE CHANNEL LINK
+                    </label>
+                    <input
+                      type="text"
+                      value={localSettings.youtubeUrl ?? ''}
+                      onChange={(e) =>
+                        setLocalSettings({ ...localSettings, youtubeUrl: e.target.value })
+                      }
+                      placeholder="https://www.youtube.com/@yourchannel"
+                      className="w-full bg-[#131b2e] text-xs font-mono text-rose-200 rounded-xl px-4 py-2.5 border border-purple-900/50 outline-none focus:border-rose-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-300 mb-1">
+                      GOOGLE MAP LINK
+                    </label>
+                    <input
+                      type="text"
+                      value={localSettings.googleMapUrl ?? ''}
+                      onChange={(e) =>
+                        setLocalSettings({ ...localSettings, googleMapUrl: e.target.value })
+                      }
+                      placeholder="https://maps.app.goo.gl/... or Google Maps URL"
+                      className="w-full bg-[#131b2e] text-xs font-mono text-emerald-200 rounded-xl px-4 py-2.5 border border-purple-900/50 outline-none focus:border-emerald-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-300 mb-1">
+                      STORE ADDRESS (OPTIONAL)
+                    </label>
+                    <input
+                      type="text"
+                      value={localSettings.storeAddress ?? ''}
+                      onChange={(e) =>
+                        setLocalSettings({ ...localSettings, storeAddress: e.target.value })
+                      }
+                      placeholder="e.g. Phnom Penh, Cambodia"
+                      className="w-full bg-[#131b2e] text-xs text-gray-200 rounded-xl px-4 py-2.5 border border-purple-900/50 outline-none focus:border-emerald-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-300 mb-1">
+                      OPEN HOURS (OPTIONAL)
+                    </label>
+                    <input
+                      type="text"
+                      value={localSettings.storeHours ?? ''}
+                      onChange={(e) =>
+                        setLocalSettings({ ...localSettings, storeHours: e.target.value })
+                      }
+                      placeholder="e.g. 9:00 AM - 9:00 PM"
+                      className="w-full bg-[#131b2e] text-xs text-gray-200 rounded-xl px-4 py-2.5 border border-purple-900/50 outline-none focus:border-cyan-400"
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-2">
+                  <button
+                    type="submit"
+                    className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-orbitron font-bold text-xs shadow-md transition flex items-center gap-2 cursor-pointer"
+                  >
+                    <i className="fa-solid fa-floppy-disk"></i>
+                    <span>SAVE CONTACT LINKS</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+
             {/* HERO COVER MEDIA (PHOTO OR VIDEO) */}
             <div className="bg-[#0f172a] p-6 sm:p-8 rounded-2xl border border-fuchsia-500/40 shadow-2xl">
               <div className="flex items-center gap-3 mb-6 pb-4 border-b border-purple-900/40">
@@ -2608,18 +2729,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             {/* CATEGORY COVERS (STEAM ONLINE / PRODUCT / GAMEថែមEXTERNAL - PHOTO / VIDEO / TEXT) */}
-            <div className="bg-[#0f172a] p-6 sm:p-8 rounded-2xl border border-sky-500/40 shadow-2xl">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-800">
+            <div
+              className={`bg-[#0f172a] p-6 sm:p-8 rounded-2xl shadow-2xl border ${
+                adminPromoCoverTab === 'external' ? 'border-fuchsia-500/40' : 'border-sky-500/40'
+              }`}
+            >
+              <div
+                className={`flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b ${
+                  adminPromoCoverTab === 'external' ? 'border-purple-900/40' : 'border-slate-800'
+                }`}
+              >
                 <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#0ea5e9]/30 to-[#ff5a00]/30 border border-sky-400/40 flex items-center justify-center text-sky-300 shrink-0">
-                    <i className="fa-solid fa-layer-group text-xl"></i>
+                  <div
+                    className={`w-10 h-10 rounded-xl border flex items-center justify-center shrink-0 ${
+                      adminPromoCoverTab === 'external'
+                        ? 'bg-gradient-to-br from-purple-600/30 to-cyan-500/30 border-fuchsia-400/40 text-fuchsia-300'
+                        : 'bg-gradient-to-br from-[#0ea5e9]/30 to-[#ff5a00]/30 border-sky-400/40 text-sky-300'
+                    }`}
+                  >
+                    <i
+                      className={`fa-solid ${
+                        adminPromoCoverTab === 'external' ? 'fa-photo-film' : 'fa-layer-group'
+                      } text-xl`}
+                    ></i>
                   </div>
                   <div>
                     <h3 className="font-orbitron font-bold text-lg text-white">
-                      CATEGORY COVERS (PHOTO / VIDEO / TEXT &amp; PROMO)
+                      {adminPromoCoverTab === 'external'
+                        ? 'EXTERNAL COVER PHOTO OR VIDEO'
+                        : 'CATEGORY COVERS (PHOTO / VIDEO / TEXT & PROMO)'}
                     </h3>
                     <p className="text-xs text-gray-400">
-                      Set separate Cover Photos, Videos, Headlines &amp; Promo Ribbons for Steam Online, Product, and GameថែមExternal.
+                      {adminPromoCoverTab === 'external'
+                        ? 'Change the External cover artwork photos (Full or Side Panels) or add a looping background video.'
+                        : 'Set separate Cover Photos, Videos, Headlines & Promo Ribbons for Steam Online, Product, and GameថែមExternal.'}
                     </p>
                   </div>
                 </div>
@@ -2641,7 +2784,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         onClick={() => setAdminPromoCoverTab(tab.id)}
                         className={`px-3 py-1.5 rounded-lg text-xs font-orbitron font-bold flex items-center gap-1.5 transition cursor-pointer whitespace-nowrap ${
                           isActive
-                            ? 'bg-gradient-to-r from-[#0ea5e9] to-[#0077e6] text-white shadow-md'
+                            ? tab.id === 'external'
+                              ? 'bg-gradient-to-r from-purple-600 to-fuchsia-600 text-white shadow-md'
+                              : 'bg-gradient-to-r from-[#0ea5e9] to-[#0077e6] text-white shadow-md'
                             : 'text-gray-400 hover:text-white hover:bg-slate-800/70'
                         }`}
                       >
