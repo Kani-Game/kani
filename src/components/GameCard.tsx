@@ -146,15 +146,17 @@ export const GameCard: React.FC<GameCardProps> = ({
                 )}
               </div>
 
-              {/* Action Buttons Row */}
+              {/* Action Buttons Row (50% / 25% / 25%) */}
               <div
-                className="flex items-center gap-1.5"
+                className="grid grid-cols-4 gap-1.5 w-full"
                 onClick={(e) => e.stopPropagation()}
               >
                 <button
                   type="button"
                   onClick={() => onToggleSelect(game)}
-                  className={`flex-1 h-8 px-2.5 rounded-lg text-[11px] font-rajdhani font-bold tracking-wide transition flex items-center justify-center gap-1.5 cursor-pointer whitespace-nowrap ${
+                  className={`${
+                    onSendToTelegram ? 'col-span-2' : 'col-span-3'
+                  } min-w-0 w-full h-8 px-1.5 rounded-lg text-[11px] font-rajdhani font-bold tracking-wide transition flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${
                     isSelected
                       ? 'bg-[#ff5a00] text-white shadow-md shadow-orange-950/50'
                       : 'bg-[#121a28] hover:bg-[#0088ff] text-slate-100 hover:text-white border border-slate-700/80 hover:border-[#0088ff]'
@@ -163,20 +165,20 @@ export const GameCard: React.FC<GameCardProps> = ({
                   <i
                     className={`fa-solid ${
                       isSelected ? 'fa-circle-check' : 'fa-plus'
-                    } text-[10px]`}
+                    } text-[10px] shrink-0`}
                   ></i>
-                  <span>{isSelected ? 'បានជ្រើស' : 'ជ្រើសរើស'}</span>
+                  <span className="truncate">{isSelected ? 'បានជ្រើស' : 'ជ្រើសរើស'}</span>
                 </button>
 
                 {onSendToTelegram && (
                   <button
                     type="button"
                     onClick={() => onSendToTelegram(game)}
-                    className="w-8 h-8 shrink-0 rounded-lg bg-[#111926] hover:bg-sky-600 text-sky-300 hover:text-white border border-slate-700/80 hover:border-sky-400 flex items-center justify-center transition cursor-pointer"
-                    title="ផ្ញើទៅ Telegram @kanigame168"
-                    aria-label={`Send ${game.name} to Telegram`}
+                    className="col-span-1 min-w-0 w-full h-8 px-1 rounded-lg bg-[#111926] hover:bg-sky-600 text-sky-300 hover:text-white border border-slate-700/80 hover:border-sky-400 text-[11px] font-rajdhani font-bold tracking-wide flex items-center justify-center transition cursor-pointer whitespace-nowrap"
+                    title="ទិញតាម Telegram @kanigame168"
+                    aria-label={`ទិញ ${game.name} តាម Telegram`}
                   >
-                    <i className="fa-brands fa-telegram text-xs"></i>
+                    <span className="truncate">ទិញ</span>
                   </button>
                 )}
 
@@ -186,7 +188,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                     e.stopPropagation();
                     onOpenPreview(game);
                   }}
-                  className="w-8 h-8 shrink-0 rounded-lg bg-[#111926] hover:bg-cyan-700 text-cyan-300 hover:text-white border border-slate-700/80 hover:border-cyan-400 flex items-center justify-center transition cursor-pointer"
+                  className="col-span-1 min-w-0 w-full h-8 rounded-lg bg-[#111926] hover:bg-cyan-700 text-cyan-300 hover:text-white border border-slate-700/80 hover:border-cyan-400 flex items-center justify-center transition cursor-pointer"
                   title="PC System Requirements & Price Details"
                   aria-label={`View PC System Requirements for ${game.name}`}
                 >
@@ -348,15 +350,17 @@ export const GameCard: React.FC<GameCardProps> = ({
                 {game.name}
               </h4>
 
-              {/* Clean Compact Action Strip */}
+              {/* Clean Compact Action Strip (50% / 25% / 25%) */}
               <div
-                className="flex items-center gap-1"
+                className="grid grid-cols-4 gap-1 w-full"
                 onClick={(e) => e.stopPropagation()}
               >
                 <button
                   type="button"
                   onClick={() => onToggleSelect(game)}
-                  className={`flex-1 h-7 px-2 rounded-md text-[11px] font-rajdhani font-bold tracking-wide transition-all flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${
+                  className={`${
+                    onSendToTelegram ? 'col-span-2' : 'col-span-3'
+                  } min-w-0 w-full h-7 px-1.5 rounded-md text-[11px] font-rajdhani font-bold tracking-wide transition-all flex items-center justify-center gap-1 cursor-pointer whitespace-nowrap ${
                     isSelected
                       ? 'bg-gradient-to-r from-purple-600 via-fuchsia-600 to-cyan-500 text-white shadow-[0_0_12px_rgba(168,85,247,0.65)]'
                       : 'bg-[#1a1236]/95 hover:bg-purple-700/80 text-gray-100 border border-purple-500/35 hover:border-fuchsia-400/70'
@@ -365,7 +369,7 @@ export const GameCard: React.FC<GameCardProps> = ({
                   <i
                     className={`fa-solid ${
                       isSelected ? 'fa-circle-check text-cyan-200' : 'fa-plus'
-                    } text-[10px]`}
+                    } text-[10px] shrink-0`}
                   ></i>
                   <span className="truncate">{isSelected ? 'បានជ្រើស' : 'ជ្រើសរើស'}</span>
                 </button>
@@ -374,11 +378,11 @@ export const GameCard: React.FC<GameCardProps> = ({
                   <button
                     type="button"
                     onClick={() => onSendToTelegram(game)}
-                    className="w-7 h-7 shrink-0 rounded-md bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 text-white flex items-center justify-center transition-all shadow-sm cursor-pointer"
-                    title="ផ្ញើទៅ Telegram @kanigame168"
-                    aria-label={`Send ${game.name} to Telegram`}
+                    className="col-span-1 min-w-0 w-full h-7 px-1 rounded-md bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-500 hover:to-cyan-500 text-white text-[11px] font-rajdhani font-bold tracking-wide flex items-center justify-center transition-all shadow-sm cursor-pointer whitespace-nowrap"
+                    title="ទិញតាម Telegram @kanigame168"
+                    aria-label={`ទិញ ${game.name} តាម Telegram`}
                   >
-                    <i className="fa-brands fa-telegram text-[10px]"></i>
+                    <span className="truncate">ទិញ</span>
                   </button>
                 )}
 
@@ -388,11 +392,11 @@ export const GameCard: React.FC<GameCardProps> = ({
                     e.stopPropagation();
                     onOpenPreview(game);
                   }}
-                  className="w-7 h-7 shrink-0 rounded-md bg-[#16102d]/95 hover:bg-cyan-950/90 text-cyan-300 hover:text-white border border-cyan-500/35 hover:border-cyan-400 flex items-center justify-center transition-colors cursor-pointer"
+                  className="col-span-1 min-w-0 w-full h-7 rounded-md bg-[#16102d]/95 hover:bg-cyan-950/90 text-cyan-300 hover:text-white border border-cyan-500/35 hover:border-cyan-400 flex items-center justify-center transition-colors cursor-pointer"
                   title="PC System Requirements (Steam Spec)"
                   aria-label={`View PC System Requirements for ${game.name}`}
                 >
-                  <i className="fa-solid fa-microchip text-[10px]"></i>
+                  <i className="fa-solid fa-microchip text-[11px]"></i>
                 </button>
               </div>
             </div>
