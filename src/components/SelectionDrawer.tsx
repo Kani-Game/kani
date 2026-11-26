@@ -31,8 +31,7 @@ export const SelectionDrawer: React.FC<SelectionDrawerProps> = ({
   };
 
   const generateTelegramMessage = () => {
-    let text = `🎮 *KANI GAME - REQUEST GAMES*\n\n`;
-    text += `ជម្រាបសួរ Admin, ខ្ញុំចង់បាន Game ចំនួន (${selectedGames.length}) ដូចខាងក្រោម៖\n\n`;
+    let text = `សួស្តី! Admin, ខ្ញុំចង់បាន Game ចំនួន (${selectedGames.length}) ដូចខាងក្រោម៖\n\n`;
 
     selectedGames.forEach((game, index) => {
       text += `${index + 1}. 🌟 ${game.name} (${game.tag})\n`;

@@ -703,8 +703,7 @@ export default function App() {
 
     const cleanHandle = (settings.telegramAdminHandle || 'kanigame168').replace('@', '').trim();
 
-    let text = `🎮 *KANI GAME - REQUEST GAMES*\n\n`;
-    text += `ជម្រាបសួរ Admin @${cleanHandle}, ខ្ញុំចង់បាន Game ចំនួន (${selectedList.length}) ដូចខាងក្រោម៖\n\n`;
+    let text = `សួស្តី! Admin, ខ្ញុំចង់បាន Game ចំនួន (${selectedList.length}) ដូចខាងក្រោម៖\n\n`;
     selectedList.forEach((game, index) => {
       text += `${index + 1}. 🌟 ${game.name} (${game.tag})\n`;
     });
@@ -726,11 +725,7 @@ export default function App() {
   const handleSendSingleGameToTelegram = async (game: Game) => {
     const cleanHandle = (settings.telegramAdminHandle || 'kanigame168').replace('@', '').trim();
 
-    let text = `🎮 KANI GAME - REQUEST GAME\n\n`;
-    text += `🌟 Game: ${game.name}\n`;
-    text += `🏷️ Tag: ${game.tag}\n`;
-    if (game.genre) text += `📁 Genre: ${game.genre}\n`;
-    text += `\nជម្រាបសួរ Admin @${cleanHandle}, ខ្ញុំចង់កុម្ម៉ង់ Game នេះ! សូមអរគុណ! 🙏`;
+    const text = `សួស្តី! ខ្ញុំចាប់អារម្មណ៍ចង់ទិញហ្គេម៖ ${game.name}`;
 
     try {
       await navigator.clipboard.writeText(text);
